@@ -324,9 +324,13 @@ class TestSynchronizer(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "target"], cwd=self.git_path, check=True)
         target_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
+        # Intentionally corrupt the file on disk in Git repo to prove it extracts from Git object DB, NOT live disk!
+        b.write_bytes(b"corrupted live disk content")
+
         # Stage with --copy (replaces old sync command)
         self.sync_mgr.stage(f"{base_hash}..{target_hash}", use_copy=True)
 
+        # Content in SVN workspace must be the exact commit target content, NOT corrupted disk content!
         self.assertEqual((self.svn_path / "binary.dat").read_bytes(), b"\x09\x08\x07\x06")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")

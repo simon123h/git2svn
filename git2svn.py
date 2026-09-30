@@ -216,6 +216,31 @@ class GitRepo:
             text=True,
         )
 
+    def run_cmd_bytes(self, args: List[str], check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        cmd = [self.git_bin] + args
+        logger.debug("Executing Git command (bytes) in %s: %s", self.repo_dir, " ".join(cmd))
+        return subprocess.run(
+            cmd,
+            cwd=self.repo_dir,
+            check=check,
+            capture_output=True,
+        )
+
+    def get_file_content_bytes(self, ref: str, path: Path) -> bytes:
+        """Extract exact binary content of a file from Git's object database at revision ref."""
+        ref_path = f"{ref}:{path.as_posix()}"
+        res = self.run_cmd_bytes(["show", ref_path])
+        return res.stdout
+
+    def get_file_mode(self, ref: str, path: Path) -> Optional[str]:
+        """Return the file mode (e.g. '100644', '100755', '120000') from git ls-tree."""
+        res = self.run_cmd(["ls-tree", ref, path.as_posix()], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            parts = res.stdout.strip().split()
+            if parts:
+                return parts[0]
+        return None
+
     def is_valid_repo(self) -> bool:
         try:
             res = self.run_cmd(["rev-parse", "--is-inside-work-tree"], check=False)
@@ -686,27 +711,26 @@ class Synchronizer:
                 if not self.dry_run and target_old.exists():
                     target_old.unlink()
 
-        # 2. Copy added, modified, renamed, and copied files
+        # 2. Extract added, modified, renamed, and copied files directly from Git object database
         for change in changes:
             if change.is_added or change.is_modified or change.is_renamed or change.is_copied:
-                src_path = self.git.repo_dir / change.path
                 dst_path = self.svn.workspace_dir / change.path
 
-                if not src_path.exists():
-                    logger.warning("Source file not found in Git workspace: %s", src_path)
-                    print(f"Warning: '{src_path}' does not exist on disk in Git workspace. Make sure '{target_ref}' is checked out in Git.", file=sys.stderr)
-                    continue
-
                 if self.dry_run:
-                    print(f"[DRY-RUN] Copy {src_path} -> {dst_path}")
+                    print(f"[DRY-RUN] Extract {target_ref}:{change.path.as_posix()} -> {dst_path}")
                 else:
                     dst_path.parent.mkdir(parents=True, exist_ok=True)
-                    if src_path.is_symlink():
-                        if dst_path.exists() or dst_path.is_symlink():
-                            dst_path.unlink()
-                        shutil.copy2(src_path, dst_path, follow_symlinks=False)
-                    elif src_path.is_file():
-                        shutil.copy2(src_path, dst_path)
+                    if dst_path.exists() or dst_path.is_symlink():
+                        dst_path.unlink()
+
+                    mode = self.git.get_file_mode(target_ref, change.path)
+                    content = self.git.get_file_content_bytes(target_ref, change.path)
+
+                    if mode == "120000":
+                        link_target = content.decode("utf-8", errors="replace").strip()
+                        os.symlink(link_target, dst_path)
+                    else:
+                        dst_path.write_bytes(content)
 
         # 3. Stage added, renamed, and copied files in SVN
         for change in changes:
