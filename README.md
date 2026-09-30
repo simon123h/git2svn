@@ -81,8 +81,8 @@ flowchart TD
 
 Comprehensive documentation-as-code is maintained in the [`docs/`](docs/) folder:
 
-- **[User Guide](docs/user-guide.md):** Complete CLI options, `stage` vs `replay` workflows, `--copy`, `--snapshot`, the conflict pause/resume lifecycle, and the recommended **Git Integration Branch Workflow**.
-- **[Architecture Documentation](docs/arc42.md):** Architectural design, package building blocks, runtime sequence diagrams, and Architecture Decision Records (ADRs).
+- **[User Guide](docs/user-guide/README.md):** Complete CLI options, [command reference](docs/user-guide/commands.md), the [Git Integration Branch Workflow](docs/user-guide/integration-workflow.md), and [troubleshooting FAQ](docs/user-guide/troubleshooting.md).
+- **[Architecture Documentation](docs/arc42/README.md):** Architectural design, package building blocks, runtime sequence diagrams, [cross-cutting concepts](docs/arc42/concepts.md), and [Architecture Decision Records (ADRs)](docs/arc42/adrs.md).
 - **[Requirements Specification](docs/req42.md):** Detailed stakeholders, functional requirements, and quality goals.
 - **[Contributing Guidelines](CONTRIBUTING.md):** Development setup, coding conventions, Conventional Commits, and test instructions.
 

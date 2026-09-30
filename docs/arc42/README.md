@@ -217,35 +217,13 @@ sequenceDiagram
 
 ## 8. Cross-Cutting Concepts
 
-### 8.1 Line Ending Mechanics
-* Git diffs are unified in `LF`.
-* When applying to a `CRLF` file, `git apply --ignore-whitespace` matches hunks cleanly but inserts new lines as `LF`.
-* Post-patch normalization inspects the original file format and replaces all line endings to guarantee pure `\r\n` or `\n` uniformity.
-* Prevents Subversion error `svn: E135000: Inconsistent line ending style`.
-
-### 8.2 Conflict Artifact Management
-* Patch rejections produce `filename.rej`.
-* State persistence records current failed commit hash, commit message, and remaining queue in `.svn/git2svn-replay.json`.
-* `replay --continue` guards against premature resumption by enforcing that all `*.rej` and `*.orig` files are resolved and removed.
-
-### 8.3 Integration Branch Pattern (Git-to-SVN Inbound/Outbound Sync)
-* Inbound SVN changes are mirrored incrementally to a tracking branch (e.g. `svn-mirror/trunk`) via `svn2git`/`all-fast-export`.
-* Development occurs on local topic branches, which are integrated via fast-forward or squash into a local `trunk` staging branch.
-* `git2svn replay -u svn-mirror/trunk..trunk` performs the outbound synchronization to SVN.
-* Following replay, `trunk` is reset to the authoritative SVN mirror (`git reset --hard svn-mirror/trunk`), eliminating drift and merge conflicts.
+Detailed architectural concepts are documented in **[Cross-Cutting Concepts](concepts.md)**:
+- Line ending mechanics (`CRLF`/`LF` normalization)
+- Conflict artifact management (`.rej` and `.orig` containment)
+- Integration branch synchronization pattern
 
 ---
 
-## 9. Architecture Decisions (ADR Summary)
+## 9. Architecture Decisions (ADRs)
 
-* **ADR-1: 2-Verb CLI Model (`stage` and `replay`):** Consolidate separate patch/copy/cherry-pick commands to preserve intuitive semantics: staging never commits; replay always commits.
-* **ADR-2: `git apply` over GNU `patch`:** Eliminates external Windows dependency on `patch.exe` and natively handles Git diff extensions.
-* **ADR-3: Post-Patch EOL Normalization:** Reconciles mixed newline styles dynamically without mutating uncommitted files before patching.
-* **ADR-4: `--snapshot` Full Tree Alignment:** Provides an escape hatch when branches diverge or Git base revision is unknown.
-* **ADR-5: Zero External Dependencies:** Preserves lightweight portable design runnable anywhere with Python 3.8+.
-* **ADR-6: Commit Message Delivery via Temporary File (`-F`):** Passes commit logs to `svn commit` via a temporary UTF-8 file instead of `-m "..."` to bypass Windows `cmd.exe` command-line length limits (8,191 chars) and quoting breakage.
-* **ADR-7: Explicit Subprocess UTF-8 Encoding:** Standardizes `encoding="utf-8", errors="replace"` across all `subprocess.run` calls, preventing Windows ANSI/OEM (`cp1252`) encoding crashes on non-ASCII commit logs or diffs.
-* **ADR-8: Windows Subversion Executable Auto-Discovery:** Resolves `svn.exe` from `PATH` or standard installation locations (`C:\Program Files\TortoiseSVN\bin\svn.exe`, `SlikSvn`) on Windows.
-* **ADR-9: Configuration Persistence via `.git/config`:** Leverages native `git config` (`git2svn.*`) for local repository settings (`svnDir`, `dryRun`, `copy`, `defaultRange`, `autoUpdate`), avoiding extra configuration files or project tree clutter.
-* **ADR-10: Optional Post-Replay Working Copy Update (`--update` / `git2svn.autoUpdate`):** Solves Subversion's mixed-revision behavior where the working copy base revision remains behind `HEAD` after commits. Made opt-in to avoid network latency and unexpected remote tree merges on slow or concurrent shared SVN repositories.
-
+Architecture Decision Records (ADR-1 through ADR-10) are documented in **[Architecture Decision Records](adrs.md)**.
