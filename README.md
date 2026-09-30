@@ -42,17 +42,20 @@ pip install .
 ### Basic Commands
 
 ```bash
+# Optional: Set default SVN path in your Git repository so you don't need -s on every command
+git config git2svn.svnDir /path/to/svn
+
 # 1. Stage a single Git commit into SVN for review (uncommitted)
 git2svn stage a1b2c3d4 -s /path/to/svn
 
 # 2. Squash an entire feature branch into an uncommitted SVN changeset
-git2svn stage main..feature/login -s /path/to/svn
+git2svn stage main..feature/login
 
 # 3. Replay an entire feature branch commit-by-commit into SVN history
-git2svn replay main..feature/login -s /path/to/svn
+git2svn replay main..feature/login
 
 # 4. Resume an interrupted replay after resolving conflicts
-git2svn replay --continue -s /path/to/svn
+git2svn replay --continue
 ```
 
 ---

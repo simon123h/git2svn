@@ -249,3 +249,18 @@ class GitRepo:
             path_str = raw.decode("utf-8", errors="replace")
             files.append(Path(path_str))
         return files
+
+    def get_config(self, key: str) -> Optional[str]:
+        """Read a configuration value from git config (local repository or global)."""
+        res = self.run_cmd(["config", "--get", key], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+        return None
+
+    def get_config_bool(self, key: str) -> Optional[bool]:
+        """Read a boolean configuration value from git config (--bool)."""
+        res = self.run_cmd(["config", "--bool", "--get", key], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            val = res.stdout.strip().lower()
+            return val in ("true", "yes", "on", "1")
+        return None

@@ -161,7 +161,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format="[%(levelname)s] %(message)s")
 
+    git_dir = args.git_dir
+    if not git_dir and args.command == "replay" and getattr(args, "replay_action", None):
+        cwd = Path.cwd()
+        state = load_replay_state(cwd)
+        if state and "git_dir" in state:
+            git_dir = Path(state["git_dir"])
+
+    git_dir = git_dir or find_default_git_dir()
+    git_repo = GitRepo(git_dir)
+    if not git_repo.is_valid_repo():
+        print(f"Error: '{git_dir}' is not a valid Git repository.", file=sys.stderr)
+        return 1
+
+    # 1. SVN workspace directory resolution: CLI arg -> $SVN_DIR -> git config -> replay cwd
     svn_dir = args.svn_dir or (Path(os.environ["SVN_DIR"]) if "SVN_DIR" in os.environ else None)
+    if not svn_dir:
+        config_svn = git_repo.get_config("git2svn.svnDir")
+        if config_svn:
+            svn_dir = Path(config_svn)
 
     # Auto-detect svn_dir from cwd for replay actions if cwd is an SVN checkout
     if not svn_dir and args.command == "replay" and getattr(args, "replay_action", None):
@@ -171,38 +189,38 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not svn_dir:
         print(
-            "Error: SVN workspace directory must be specified with --svn-dir or the SVN_DIR environment variable.",
+            "Error: SVN workspace directory must be specified via --svn-dir, SVN_DIR env, or 'git config git2svn.svnDir <path>'.",
             file=sys.stderr,
         )
         return 1
 
-    git_dir = args.git_dir
-    if not git_dir and args.command == "replay" and getattr(args, "replay_action", None):
-        state = load_replay_state(svn_dir)
-        if state and "git_dir" in state:
-            git_dir = Path(state["git_dir"])
+    # Config fallbacks for dry_run and copy
+    dry_run = args.dry_run
+    if not dry_run:
+        config_dry_run = git_repo.get_config_bool("git2svn.dryRun")
+        if config_dry_run is not None:
+            dry_run = config_dry_run
 
-    git_dir = git_dir or find_default_git_dir()
+    use_copy = getattr(args, "copy", False)
+    if not use_copy:
+        config_copy = git_repo.get_config_bool("git2svn.copy")
+        if config_copy is not None:
+            use_copy = config_copy
 
-    git_repo = GitRepo(git_dir)
-    if not git_repo.is_valid_repo():
-        print(f"Error: '{git_dir}' is not a valid Git repository.", file=sys.stderr)
-        return 1
-
-    svn_workspace = SvnWorkspace(svn_dir, dry_run=args.dry_run)
-    if not svn_workspace.is_valid_workspace() and not args.dry_run:
+    svn_workspace = SvnWorkspace(svn_dir, dry_run=dry_run)
+    if not svn_workspace.is_valid_workspace() and not dry_run:
         print(f"Error: '{svn_dir}' does not appear to be an SVN working copy (no .svn found).", file=sys.stderr)
         return 1
 
-    patcher = Patcher(svn_dir, dry_run=args.dry_run)
-    sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=args.dry_run)
+    patcher = Patcher(svn_dir, dry_run=dry_run)
+    sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=dry_run)
 
     try:
         if args.command == "stage":
             sync_mgr.stage(
                 args.ref1,
                 args.ref2,
-                use_copy=getattr(args, "copy", False),
+                use_copy=use_copy,
                 snapshot=getattr(args, "snapshot", False),
             )
         elif args.command == "replay":

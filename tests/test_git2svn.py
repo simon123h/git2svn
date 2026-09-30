@@ -511,6 +511,34 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual((self.svn_path / "cli_test.txt").read_text(), "cli test\n")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_main_cli_git_config_fallback(self, mock_svn_cmd):
+        """Verify git config git2svn.svnDir is used when --svn-dir is omitted."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Configure git2svn.svnDir in repository .git/config
+        subprocess.run(["git", "config", "git2svn.svnDir", str(self.svn_path)], cwd=self.git_path, check=True)
+
+        f = self.git_path / "cfg_test.txt"
+        f.write_text("config test\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "config test"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # Omit --svn-dir
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "stage",
+                commit_hash,
+            ]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual((self.svn_path / "cfg_test.txt").read_text(), "config test\n")
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_eol_preservation_on_crlf_target(self, mock_svn_cmd):
         """Verify git apply with an LF patch preserves CRLF line endings on CRLF target file."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")

@@ -12,12 +12,32 @@ All options can be specified either before or after subcommands:
 git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose] <command>
 ```
 
-| Option | Flag | Environment Variable | Default | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `--svn-dir` | `-s` | `SVN_DIR` | None (required) | Path to the local Subversion working copy (`.svn` root). |
-| `--git-dir` | `-g` | — | Current Git root | Path to the local Git repository root. |
-| `--dry-run` | `-n` | — | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
-| `--verbose` | `-v` | — | `False` | Print detailed debug logs and execution traces. |
+| Option | Flag | Environment Variable | Git Config Key (`.git/config`) | Default | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `--svn-dir` | `-s` | `SVN_DIR` | `git2svn.svnDir` | None (required) | Path to the local Subversion working copy (`.svn` root). |
+| `--git-dir` | `-g` | — | — | Current Git root | Path to the local Git repository root. |
+| `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
+| `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
+| `--copy` | — | — | `git2svn.copy` | `False` | Extract exact binary snapshots directly from Git object DB. |
+
+### 1.1 Persisting Settings via `git config`
+
+To avoid typing `--svn-dir` or setting environment variables on every run, configure options directly in your repository's `.git/config`:
+
+```bash
+# Configure SVN working copy path for this repository:
+git config git2svn.svnDir "C:/Projects/my-svn-checkout"
+
+# Optionally configure defaults for copy extraction or dry-run:
+git config git2svn.copy true
+git config git2svn.dryRun false
+```
+
+#### Precedence Hierarchy:
+1. Explicit CLI arguments (`--svn-dir`, `--dry-run`, `--copy`)
+2. Environment variables (`SVN_DIR`)
+3. Repository or global Git configuration (`git config git2svn.*`)
+4. System defaults
 
 ---
 
