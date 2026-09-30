@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import shutil
 import sys
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from .eol import detect_file_eol, normalize_file_eol
@@ -109,8 +109,12 @@ class Synchronizer:
         added_files = sorted(git_files_set - svn_files_set)
         common_files = sorted(git_files_set & svn_files_set)
 
-        logger.info("Snapshot delta: %d added, %d deleted, %d existing files to compare",
-                    len(added_files), len(deleted_files), len(common_files))
+        logger.info(
+            "Snapshot delta: %d added, %d deleted, %d existing files to compare",
+            len(added_files),
+            len(deleted_files),
+            len(common_files),
+        )
 
         # 1. Handle deleted files: remove from SVN and disk
         for rel_path in deleted_files:
@@ -259,7 +263,9 @@ class Synchronizer:
             logger.info("Committing resolved commit %s to SVN...", current_commit)
             self.svn.commit(current_msg)
         else:
-            logger.info("No changes in SVN workspace to commit for %s (commit resolved as empty or skipped).", current_commit)
+            logger.info(
+                "No changes in SVN workspace to commit for %s (commit resolved as empty or skipped).", current_commit
+            )
 
         completed += 1
         logger.info("Commit %s (%d/%d) resolved and committed.", current_commit, completed, total)
@@ -317,8 +323,8 @@ class Synchronizer:
             try:
                 self._patch_and_stage_commit(commit_hash)
                 self.svn.commit(commit_msg)
-            except Exception as e:
-                remaining = commits[idx - start_index + 1:]
+            except Exception:
+                remaining = commits[idx - start_index + 1 :]
                 state_data = {
                     "state": "CONFLICT_PAUSED",
                     "git_dir": str(self.git.repo_dir),
@@ -336,10 +342,10 @@ class Synchronizer:
                 rej_info = ""
                 if rej_files:
                     rej_rel = [str(r.relative_to(self.svn.workspace_dir)) for r in rej_files]
-                    rej_info = f"\nConflicts detected in:\n" + "\n".join(f"  - {f}" for f in rej_rel)
+                    rej_info = "\nConflicts detected in:\n" + "\n".join(f"  - {f}" for f in rej_rel)
 
                 print(
-                    f"\n[PAUSED] Conflict while applying commit {commit_hash[:8]} ({idx}/{total_commits}): \"{first_line}\""
+                    f'\n[PAUSED] Conflict while applying commit {commit_hash[:8]} ({idx}/{total_commits}): "{first_line}"'
                     f"{rej_info}\n\n"
                     f"To resolve:\n"
                     f"  1. Resolve conflicts in '{self.svn.workspace_dir}' and stage changes ('svn add' / 'svn rm').\n"

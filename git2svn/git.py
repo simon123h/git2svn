@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger("git2svn")
 
 
-def parse_ref_arguments(primary_ref: Optional[str], secondary_ref: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
+def parse_ref_arguments(
+    primary_ref: Optional[str], secondary_ref: Optional[str] = None
+) -> Tuple[bool, str, Optional[str]]:
     """
     Parses CLI ref arguments into either a single commit or a (start_ref, end_ref) range.
     Returns: (is_single, start_or_commit, end_ref)

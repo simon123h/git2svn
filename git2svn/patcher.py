@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 logger = logging.getLogger("git2svn")
 
@@ -24,7 +24,7 @@ class Patcher:
 
         cmd = [self.git_bin, "apply", "--ignore-whitespace", "--unsafe-paths", "--reject"]
         if self.dry_run:
-            print(f"[DRY-RUN] (in {self.target_dir}) { ' '.join(cmd) } << EOF\n{diff_content.strip()[:200]}...\nEOF")
+            print(f"[DRY-RUN] (in {self.target_dir}) {' '.join(cmd)} << EOF\n{diff_content.strip()[:200]}...\nEOF")
             return
 
         logger.debug("Applying patch to %s using %s", self.target_dir, " ".join(cmd))
@@ -37,14 +37,18 @@ class Patcher:
         )
 
         if proc.returncode != 0:
-            logger.error("git apply failed with code %d:\nSTDOUT:\n%s\nSTDERR:\n%s",
-                         proc.returncode, proc.stdout, proc.stderr)
+            logger.error(
+                "git apply failed with code %d:\nSTDOUT:\n%s\nSTDERR:\n%s", proc.returncode, proc.stdout, proc.stderr
+            )
             print(f"Error: git apply failed (exit code {proc.returncode}).", file=sys.stderr)
             if proc.stdout:
                 print(proc.stdout, file=sys.stderr)
             if proc.stderr:
                 print(proc.stderr, file=sys.stderr)
-            print("Tip: Check for .rej reject files in the SVN workspace or use 'git2svn stage --copy' to copy files directly.", file=sys.stderr)
+            print(
+                "Tip: Check for .rej reject files in the SVN workspace or use 'git2svn stage --copy' to copy files directly.",
+                file=sys.stderr,
+            )
             raise subprocess.CalledProcessError(proc.returncode, cmd, proc.stdout, proc.stderr)
         else:
             if proc.stdout or proc.stderr:

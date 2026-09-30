@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import Dict, List
 
 from .git import FileChange
@@ -22,7 +22,7 @@ class SvnWorkspace:
     def run_cmd(self, args: List[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         cmd = [self.svn_bin] + args
         if self.dry_run:
-            print(f"[DRY-RUN] (in {self.workspace_dir}) { ' '.join(cmd) }")
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {' '.join(cmd)}")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         logger.debug("Executing SVN command in %s: %s", self.workspace_dir, " ".join(cmd))
@@ -120,7 +120,9 @@ class SvnWorkspace:
         if res.returncode != 0:
             if "is already under version control" not in res.stderr and "already exists" not in res.stderr:
                 logger.error("Failed to 'svn add %s': %s", posix_path, res.stderr.strip())
-                raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "add", posix_path], res.stdout, res.stderr)
+                raise subprocess.CalledProcessError(
+                    res.returncode, [self.svn_bin, "add", posix_path], res.stdout, res.stderr
+                )
 
     def stage_rm(self, rel_path: Path) -> None:
         """Run svn rm <filepath>."""
@@ -131,7 +133,9 @@ class SvnWorkspace:
                 logger.warning("File %s not under SVN control to remove.", posix_path)
             else:
                 logger.error("Failed to 'svn rm %s': %s", posix_path, res.stderr.strip())
-                raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "rm", posix_path], res.stdout, res.stderr)
+                raise subprocess.CalledProcessError(
+                    res.returncode, [self.svn_bin, "rm", posix_path], res.stdout, res.stderr
+                )
 
     def commit(self, message: str) -> None:
         """Run svn commit -m <message>."""

@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from .core import Synchronizer
@@ -85,7 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common_parser],
         help="Stage changes in SVN workspace without committing (for review)",
     )
-    parser_stage.add_argument("ref1", help="Commit hash, branch, or start ref (e.g. 'abc1234' or 'main..feature' or 'main')")
+    parser_stage.add_argument(
+        "ref1", help="Commit hash, branch, or start ref (e.g. 'abc1234' or 'main..feature' or 'main')"
+    )
     parser_stage.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
     parser_stage.add_argument(
         "--copy",
@@ -166,7 +168,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             svn_dir = cwd
 
     if not svn_dir:
-        print("Error: SVN workspace directory must be specified with --svn-dir or the SVN_DIR environment variable.", file=sys.stderr)
+        print(
+            "Error: SVN workspace directory must be specified with --svn-dir or the SVN_DIR environment variable.",
+            file=sys.stderr,
+        )
         return 1
 
     git_dir = args.git_dir
@@ -208,7 +213,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 sync_mgr.replay_skip()
             else:
                 if not args.ref1:
-                    print("Error: replay requires a commit or range unless using --continue, --abort, or --skip.", file=sys.stderr)
+                    print(
+                        "Error: replay requires a commit or range unless using --continue, --abort, or --skip.",
+                        file=sys.stderr,
+                    )
                     return 1
                 sync_mgr.replay(args.ref1, args.ref2)
         else:
@@ -220,6 +228,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         logger.error("Operation failed: %s", e)
         if args.verbose:
             import traceback
+
             traceback.print_exc()
         return 1
 

@@ -174,10 +174,25 @@ If a patch conflict occurs during a replay:
 
 ---
 
-## 5. Development & Testing
+## 5. Development & Quality Assurance
 
+### 5.1 Running Tests
 Run the test suite using standard Python `unittest`:
 
 ```bash
 python3 -m unittest discover tests
+```
+
+### 5.2 Linting & Formatting with Ruff
+The project uses [Ruff](https://astral.sh/ruff) for linting and code formatting:
+
+```bash
+# Check code for lint errors and auto-fix what's safe
+ruff check --fix .
+
+# Format code
+ruff format .
+
+# Check formatting without modifying
+ruff format --check .
 ```

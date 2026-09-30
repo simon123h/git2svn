@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-import os
-from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import MagicMock, call, patch
+from pathlib import Path
+from unittest.mock import patch
 
 import git2svn
 
@@ -201,14 +199,7 @@ class TestPatcher(unittest.TestCase):
         target_file = self.target_dir / "sample.txt"
         target_file.write_text("Hello\nWorld\n")
 
-        diff = (
-            "--- a/sample.txt\n"
-            "+++ b/sample.txt\n"
-            "@@ -1,2 +1,3 @@\n"
-            " Hello\n"
-            "+Awesome\n"
-            " World\n"
-        )
+        diff = "--- a/sample.txt\n+++ b/sample.txt\n@@ -1,2 +1,3 @@\n Hello\n+Awesome\n World\n"
         self.patcher.apply_diff(diff)
         self.assertEqual(target_file.read_text(), "Hello\nAwesome\nWorld\n")
 
@@ -259,7 +250,9 @@ class TestSynchronizer(unittest.TestCase):
         new_file.write_text("util\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "feat: update"], cwd=self.git_path, check=True)
-        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         # Run stage
         self.sync_mgr.stage(commit_hash)
@@ -282,7 +275,9 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("base\n")
         subprocess.run(["git", "add", "code.txt"], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         (self.svn_path / "code.txt").write_text("base\n")
 
@@ -295,7 +290,9 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("step2 finalized\n")
         subprocess.run(["git", "add", "code.txt"], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "step2"], cwd=self.git_path, check=True)
-        head_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        head_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         # Stage range (squashed)
         self.sync_mgr.stage(base_hash, head_hash)
@@ -314,7 +311,9 @@ class TestSynchronizer(unittest.TestCase):
         b.write_bytes(b"\x01\x02\x03")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         (self.svn_path / "binary.dat").write_bytes(b"\x01\x02\x03")
 
@@ -322,7 +321,9 @@ class TestSynchronizer(unittest.TestCase):
         b.write_bytes(b"\x09\x08\x07\x06")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "target"], cwd=self.git_path, check=True)
-        target_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        target_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         # Intentionally corrupt the file on disk in Git repo to prove it extracts from Git object DB, NOT live disk!
         b.write_bytes(b"corrupted live disk content")
@@ -341,7 +342,9 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("single content\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "feat: single commit"], cwd=self.git_path, check=True)
-        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         self.sync_mgr.replay(commit_hash)
 
@@ -359,7 +362,9 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("v0\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         (self.svn_path / "file.txt").write_text("v0\n")
 
@@ -372,7 +377,9 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("v2\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "commit 2"], cwd=self.git_path, check=True)
-        target_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        target_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         self.sync_mgr.replay(base_hash, target_hash)
 
@@ -390,7 +397,9 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("line A\nline B\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         (self.svn_path / "conflict_test.txt").write_text("line DIFFERENT\nline B\n")
 
@@ -398,14 +407,18 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("line A MODIFIED\nline B\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "commit with conflict"], cwd=self.git_path, check=True)
-        c1_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        c1_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         # Git commit 2
         f2 = self.git_path / "next_file.txt"
         f2.write_text("next\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "commit 2"], cwd=self.git_path, check=True)
-        c2_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        c2_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         # Replay should fail on commit 1 with conflict
         with self.assertRaises(subprocess.CalledProcessError):
@@ -449,7 +462,10 @@ class TestSynchronizer(unittest.TestCase):
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_identity_banner(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess(
-            [], 0, stdout="URL: https://svn.example.com/repo/branches/feature\nRelative URL: ^/branches/feature\nRevision: 1042\n", stderr=""
+            [],
+            0,
+            stdout="URL: https://svn.example.com/repo/branches/feature\nRelative URL: ^/branches/feature\nRevision: 1042\n",
+            stderr="",
         )
         with patch("builtins.print") as mock_print:
             self.sync_mgr.show_identity_banner("master..feature")
@@ -466,13 +482,20 @@ class TestSynchronizer(unittest.TestCase):
         f.write_text("cli test\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "cli test"], cwd=self.git_path, check=True)
-        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
-        code = git2svn.main([
-            "--git-dir", str(self.git_path),
-            "--svn-dir", str(self.svn_path),
-            "stage", commit_hash,
-        ])
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "--svn-dir",
+                str(self.svn_path),
+                "stage",
+                commit_hash,
+            ]
+        )
         self.assertEqual(code, 0)
         self.assertEqual((self.svn_path / "cli_test.txt").read_text(), "cli test\n")
 
@@ -495,7 +518,9 @@ class TestSynchronizer(unittest.TestCase):
         git_file.write_bytes(b"line 1\nline 2 modified\nline 3\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "modify in git (LF)"], cwd=self.git_path, check=True)
-        c_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        c_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         self.sync_mgr.stage(c_hash)
 
@@ -522,7 +547,9 @@ class TestSynchronizer(unittest.TestCase):
         git_file.write_bytes(b"line 1\nline 2 updated\nline 3\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "update"], cwd=self.git_path, check=True)
-        c_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        c_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         self.sync_mgr.stage(c_hash, use_copy=True)
 
@@ -553,7 +580,9 @@ class TestSynchronizer(unittest.TestCase):
         (self.git_path / "brand_new.txt").write_bytes(b"new file content\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "target snapshot commit"], cwd=self.git_path, check=True)
-        target_ref = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        target_ref = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
 
         # Run stage --snapshot
         self.sync_mgr.stage(target_ref, snapshot=True)
