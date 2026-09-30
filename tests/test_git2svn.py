@@ -134,7 +134,7 @@ class TestCliArgs(unittest.TestCase):
 class TestSvnWorkspace(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.workspace_dir = Path(self.temp_dir.name)
+        self.workspace_dir = Path(self.temp_dir.name).resolve()
         (self.workspace_dir / ".svn").mkdir()
         self.svn = git2svn.SvnWorkspace(self.workspace_dir)
 
@@ -199,7 +199,7 @@ class TestSvnWorkspace(unittest.TestCase):
 class TestPatcher(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.target_dir = Path(self.temp_dir.name)
+        self.target_dir = Path(self.temp_dir.name).resolve()
         self.patcher = git2svn.Patcher(self.target_dir)
 
     def tearDown(self):
@@ -223,8 +223,8 @@ class TestSynchronizer(unittest.TestCase):
     def setUp(self):
         self.git_dir = tempfile.TemporaryDirectory()
         self.svn_dir = tempfile.TemporaryDirectory()
-        self.git_path = Path(self.git_dir.name)
-        self.svn_path = Path(self.svn_dir.name)
+        self.git_path = Path(self.git_dir.name).resolve()
+        self.svn_path = Path(self.svn_dir.name).resolve()
         (self.svn_path / ".svn").mkdir()
 
         # Initialize real git repository
@@ -615,7 +615,7 @@ class TestSynchronizer(unittest.TestCase):
 class TestEolUtilities(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.path = Path(self.temp_dir.name)
+        self.path = Path(self.temp_dir.name).resolve()
 
     def tearDown(self):
         self.temp_dir.cleanup()

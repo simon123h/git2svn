@@ -25,7 +25,7 @@ class TestGit2SvnE2E(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.root_path = Path(self.temp_dir.name)
+        self.root_path = Path(self.temp_dir.name).resolve()
 
         self.git_dir = self.root_path / "git_repo"
         self.svn_repo_dir = self.root_path / "svn_remote_repo"
