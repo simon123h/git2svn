@@ -59,8 +59,9 @@ ruff format --check .
 All code must pass `ruff check .` and `ruff format --check .` with zero errors or warnings before committing.
 
 ### 2.3 Documentation-as-Code
-* All architecture documentation resides in [`docs/arc42.md`](file:///home/simon/Code/git2svn/docs/arc42.md) following the [arc42 template](https://arc42.org/).
-* All requirements documentation resides in [`docs/req42.md`](file:///home/simon/Code/git2svn/docs/req42.md) following the [req42 framework](https://req42.de/).
+* All architecture documentation resides in [`docs/arc42.md`](docs/arc42.md) following the [arc42 template](https://arc42.org/).
+* All requirements documentation resides in [`docs/req42.md`](docs/req42.md) following the [req42 framework](https://req42.de/).
+* CLI workflows and command guides reside in [`docs/user-guide.md`](docs/user-guide.md).
 * Diagrams are embedded directly using **Mermaid.js** code blocks (`mermaid`).
 
 ---

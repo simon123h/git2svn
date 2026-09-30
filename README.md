@@ -73,12 +73,12 @@ flowchart TD
 
 ## Documentation
 
-Comprehensive documentation-as-code is maintained in the [`docs/`](file:///home/simon/Code/git2svn/docs) folder:
+Comprehensive documentation-as-code is maintained in the [`docs/`](docs/) folder:
 
-- **[User Guide (`docs/user-guide.md`)](file:///home/simon/Code/git2svn/docs/user-guide.md):** Complete CLI options, `stage` vs `replay` workflows, `--copy`, `--snapshot`, and the conflict pause/resume lifecycle.
-- **[Architecture Documentation (`docs/arc42.md`)](file:///home/simon/Code/git2svn/docs/arc42.md):** Architectural design, package building blocks, runtime sequence diagrams, and Architecture Decision Records (ADRs).
-- **[Requirements Specification (`docs/req42.md`)](file:///home/simon/Code/git2svn/docs/req42.md):** Detailed stakeholders, functional requirements, and quality goals.
-- **[Contributing Guidelines (`CONTRIBUTING.md`)](file:///home/simon/Code/git2svn/CONTRIBUTING.md):** Development setup, coding conventions, Conventional Commits, and test instructions.
+- **[User Guide](docs/user-guide.md):** Complete CLI options, `stage` vs `replay` workflows, `--copy`, `--snapshot`, and the conflict pause/resume lifecycle.
+- **[Architecture Documentation](docs/arc42.md):** Architectural design, package building blocks, runtime sequence diagrams, and Architecture Decision Records (ADRs).
+- **[Requirements Specification](docs/req42.md):** Detailed stakeholders, functional requirements, and quality goals.
+- **[Contributing Guidelines](CONTRIBUTING.md):** Development setup, coding conventions, Conventional Commits, and test instructions.
 
 ---
 
@@ -97,4 +97,4 @@ ruff format .
 
 ## License
 
-Distributed under the [Apache-2.0 License](file:///home/simon/Code/git2svn/LICENSE.md).
+Distributed under the [Apache-2.0 License](LICENSE.md).
