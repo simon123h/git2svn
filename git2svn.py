@@ -235,22 +235,24 @@ class SvnWorkspace:
         else:
             print(f"[DRY-RUN] Ensure parent directory exists: {target_path.parent}")
 
-        res = self.run_cmd(["add", str(rel_path), "--parents"], check=False)
+        posix_path = rel_path.as_posix()
+        res = self.run_cmd(["add", posix_path, "--parents"], check=False)
         if res.returncode != 0:
             # Check if it was already versioned (common in repeated runs)
             if "is already under version control" not in res.stderr and "already exists" not in res.stderr:
-                logger.error("Failed to 'svn add %s': %s", rel_path, res.stderr.strip())
-                raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "add", str(rel_path)], res.stdout, res.stderr)
+                logger.error("Failed to 'svn add %s': %s", posix_path, res.stderr.strip())
+                raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "add", posix_path], res.stdout, res.stderr)
 
     def stage_rm(self, rel_path: Path) -> None:
         """Run svn rm <filepath>."""
-        res = self.run_cmd(["rm", str(rel_path)], check=False)
+        posix_path = rel_path.as_posix()
+        res = self.run_cmd(["rm", posix_path], check=False)
         if res.returncode != 0:
             if "is not under version control" in res.stderr:
-                logger.warning("File %s not under SVN control to remove.", rel_path)
+                logger.warning("File %s not under SVN control to remove.", posix_path)
             else:
-                logger.error("Failed to 'svn rm %s': %s", rel_path, res.stderr.strip())
-                raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "rm", str(rel_path)], res.stdout, res.stderr)
+                logger.error("Failed to 'svn rm %s': %s", posix_path, res.stderr.strip())
+                raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "rm", posix_path], res.stdout, res.stderr)
 
     def commit(self, message: str) -> None:
         """Run svn commit -m <message>."""
@@ -296,12 +298,33 @@ class SvnWorkspace:
                 logger.debug("Modified file requires no SVN structural command: %s", change.path)
 
 
+def find_patch_binary() -> str:
+    """Find the patch executable, checking Git for Windows default paths if on Windows."""
+    found = shutil.which("patch")
+    if found:
+        return found
+    if sys.platform == "win32":
+        git_path = shutil.which("git")
+        if git_path:
+            git_dir = Path(git_path).resolve().parent
+            candidates = [
+                git_dir.parent / "usr" / "bin" / "patch.exe",
+                git_dir / "patch.exe",
+                Path("C:/Program Files/Git/usr/bin/patch.exe"),
+                Path("C:/Program Files (x86)/Git/usr/bin/patch.exe"),
+            ]
+            for c in candidates:
+                if c.is_file():
+                    return str(c)
+    return "patch"
+
+
 class Patcher:
     """Wrapper to apply diffs using patch -p1."""
 
-    def __init__(self, target_dir: Path, patch_bin: str = "patch", dry_run: bool = False):
+    def __init__(self, target_dir: Path, patch_bin: Optional[str] = None, dry_run: bool = False):
         self.target_dir = target_dir.resolve()
-        self.patch_bin = patch_bin
+        self.patch_bin = patch_bin or find_patch_binary()
         self.dry_run = dry_run
 
     def apply_diff(self, diff_content: str) -> None:
@@ -310,7 +333,7 @@ class Patcher:
             logger.info("Diff is empty. Nothing to patch.")
             return
 
-        cmd = [self.patch_bin, "-p1", "--batch"]
+        cmd = [self.patch_bin, "-p1", "--batch", "--binary"]
         if self.dry_run:
             print(f"[DRY-RUN] (in {self.target_dir}) { ' '.join(cmd) } << EOF\n{diff_content.strip()[:200]}...\nEOF")
             return
