@@ -37,6 +37,9 @@ cd git2svn
 
 # (Optional) Install CLI globally or into your virtual environment:
 pip install .
+
+# Or install the latest release wheel directly from GitHub Releases:
+# pip install https://github.com/simon123h/git2svn/releases/latest/download/git2svn-<version>-py3-none-any.whl
 ```
 
 ### Basic Commands

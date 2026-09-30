@@ -1,0 +1,204 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Semantic Version Bump'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - custom
+      custom_version:
+        description: 'Custom Version (only if "custom" selected above, e.g. v0.2.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    name: Resolve / Create Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve_tag.outputs.tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve Release Tag
+        id: resolve_tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+            echo "Triggered by tag push: $TAG"
+          else
+            # Triggered via workflow_dispatch -> compute next semver
+            LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+            if [ -z "$LATEST_TAG" ]; then
+              LATEST_TAG="v0.1.0"
+            fi
+            echo "Latest stable tag: $LATEST_TAG"
+
+            RAW_VER="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$RAW_VER"
+
+            BUMP="${{ github.event.inputs.bump }}"
+            CUSTOM="${{ github.event.inputs.custom_version }}"
+
+            if [ "$BUMP" = "patch" ]; then
+              TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            elif [ "$BUMP" = "minor" ]; then
+              TAG="v${MAJOR}.$((MINOR + 1)).0"
+            elif [ "$BUMP" = "major" ]; then
+              TAG="v$((MAJOR + 1)).0.0"
+            elif [ "$BUMP" = "custom" ]; then
+              if [ -z "$CUSTOM" ]; then
+                echo "Error: custom_version cannot be empty when bump=custom" >&2
+                exit 1
+              fi
+              if [[ ! "$CUSTOM" =~ ^v ]]; then
+                TAG="v${CUSTOM}"
+              else
+                TAG="${CUSTOM}"
+              fi
+            fi
+
+            echo "Computed new tag: $TAG"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    name: Build Wheel & Create GitHub Release
+    needs: tag-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.tag-release.outputs.tag }}
+
+      - name: Fetch All Tags
+        run: |
+          git fetch --tags --force
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Build Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build Python Package (Wheel & Sdist)
+        env:
+          TAG: ${{ needs.tag-release.outputs.tag }}
+        run: |
+          # Strip leading 'v' for versioning in package metadata
+          VERSION="${TAG#v}"
+          echo "Building wheel and source distribution for version: $VERSION"
+          # Update version dynamically in pyproject.toml for the release build
+          sed -i -E "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          python -m build
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.tag-release.outputs.tag }}
+        run: |
+          EXTRA_FLAGS=()
+
+          if [[ "$TAG" =~ (alpha|beta|rc|dev|[0-9]+[ab][0-9]+) ]]; then
+            EXTRA_FLAGS+=(--prerelease)
+            START_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          else
+            START_TAG=$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${TAG}$" | head -n 1 || true)
+            if [ -z "$START_TAG" ]; then
+              START_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+            fi
+          fi
+
+          RANGE="${START_TAG}..${TAG}"
+          if [ -z "$START_TAG" ]; then
+            RANGE="${TAG}"
+          fi
+
+          REPO_URL="https://github.com/${{ github.repository }}"
+          NOTES_FILE="/tmp/release_notes.md"
+          echo "## What's Changed" > "$NOTES_FILE"
+          echo "" >> "$NOTES_FILE"
+
+          FEATS=$(git log "$RANGE" --grep="^feat" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
+          FIXES=$(git log "$RANGE" --grep="^fix" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
+          MAINT=$(git log "$RANGE" --grep="^chore" --grep="^perf" --grep="^refactor" --grep="^docs" --grep="^ci" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
+          OTHER=$(git log "$RANGE" --invert-grep --grep="^feat" --grep="^fix" --grep="^chore" --grep="^perf" --grep="^refactor" --grep="^docs" --grep="^ci" --grep="^style" --grep="^test" --grep="^Merge" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
+
+          HAS_CONTENT=false
+
+          if [ -n "$FEATS" ]; then
+            echo "### 🚀 Features" >> "$NOTES_FILE"
+            echo "$FEATS" >> "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+            HAS_CONTENT=true
+          fi
+
+          if [ -n "$FIXES" ]; then
+            echo "### 🐛 Bug Fixes" >> "$NOTES_FILE"
+            echo "$FIXES" >> "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+            HAS_CONTENT=true
+          fi
+
+          if [ -n "$MAINT" ]; then
+            echo "### 🧰 Maintenance & Dependencies" >> "$NOTES_FILE"
+            echo "$MAINT" >> "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+            HAS_CONTENT=true
+          fi
+
+          if [ -n "$OTHER" ]; then
+            echo "### 📦 Other Changes" >> "$NOTES_FILE"
+            echo "$OTHER" >> "$NOTES_FILE"
+            echo "" >> "$NOTES_FILE"
+            HAS_CONTENT=true
+          fi
+
+          if [ "$HAS_CONTENT" = false ]; then
+            git log "$RANGE" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" >> "$NOTES_FILE" || true
+            echo "" >> "$NOTES_FILE"
+          fi
+
+          if [ -n "$START_TAG" ]; then
+            echo "**Full Changelog**: $REPO_URL/compare/${START_TAG}...${TAG}" >> "$NOTES_FILE"
+          fi
+
+          echo "" >> "$NOTES_FILE"
+          echo "### 📥 Installation from Release Asset" >> "$NOTES_FILE"
+          echo '```bash' >> "$NOTES_FILE"
+          echo '# Install wheel directly via pip:' >> "$NOTES_FILE"
+          echo "pip install https://github.com/${{ github.repository }}/releases/download/${TAG}/git2svn-${TAG#v}-py3-none-any.whl" >> "$NOTES_FILE"
+          echo '```' >> "$NOTES_FILE"
+
+          gh release create "$TAG" dist/* \
+            --title "$TAG" \
+            --notes-file "$NOTES_FILE" \
+            "${EXTRA_FLAGS[@]}"
