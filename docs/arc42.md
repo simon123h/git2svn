@@ -246,6 +246,6 @@ sequenceDiagram
 * **ADR-6: Commit Message Delivery via Temporary File (`-F`):** Passes commit logs to `svn commit` via a temporary UTF-8 file instead of `-m "..."` to bypass Windows `cmd.exe` command-line length limits (8,191 chars) and quoting breakage.
 * **ADR-7: Explicit Subprocess UTF-8 Encoding:** Standardizes `encoding="utf-8", errors="replace"` across all `subprocess.run` calls, preventing Windows ANSI/OEM (`cp1252`) encoding crashes on non-ASCII commit logs or diffs.
 * **ADR-8: Windows Subversion Executable Auto-Discovery:** Resolves `svn.exe` from `PATH` or standard installation locations (`C:\Program Files\TortoiseSVN\bin\svn.exe`, `SlikSvn`) on Windows.
-* **ADR-9: Configuration Persistence via `.git/config`:** Leverages native `git config` (`git2svn.*`) for local repository settings (`svnDir`, `dryRun`, `copy`), avoiding extra configuration files or project tree clutter.
+* **ADR-9: Configuration Persistence via `.git/config`:** Leverages native `git config` (`git2svn.*`) for local repository settings (`svnDir`, `dryRun`, `copy`, `defaultRange`, `autoUpdate`), avoiding extra configuration files or project tree clutter.
 * **ADR-10: Optional Post-Replay Working Copy Update (`--update` / `git2svn.autoUpdate`):** Solves Subversion's mixed-revision behavior where the working copy base revision remains behind `HEAD` after commits. Made opt-in to avoid network latency and unexpected remote tree merges on slow or concurrent shared SVN repositories.
 

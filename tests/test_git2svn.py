@@ -596,6 +596,89 @@ class TestSynchronizer(unittest.TestCase):
         self.assertIn(["update"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_with_git_config_default_range(self, mock_svn_cmd):
+        """Verify git2svn replay with no ref arguments falls back to git2svn.defaultRange."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Create base commit
+        base_file = self.git_path / "base.txt"
+        base_file.write_text("base\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base commit"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # Create branch 'trunk'
+        subprocess.run(["git", "branch", "trunk"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "checkout", "trunk"], cwd=self.git_path, check=True)
+
+        # Create commit on trunk
+        trunk_file = self.git_path / "trunk_feat.txt"
+        trunk_file.write_text("trunk feat\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "feat: on trunk"], cwd=self.git_path, check=True)
+
+        # Switch to another branch to ensure defaultRange is branch-independent
+        subprocess.run(["git", "checkout", "-b", "feature/other"], cwd=self.git_path, check=True)
+
+        # Configure defaultRange to base_hash..trunk
+        subprocess.run(["git", "config", "git2svn.defaultRange", f"{base_hash}..trunk"], cwd=self.git_path, check=True)
+
+        # Run replay without ref1 or ref2
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "--svn-dir",
+                str(self.svn_path),
+                "replay",
+            ]
+        )
+        self.assertEqual(code, 0)
+        # Verify the file on trunk was committed to SVN
+        self.assertTrue((self.svn_path / "trunk_feat.txt").is_file())
+        self.assertEqual((self.svn_path / "trunk_feat.txt").read_text(), "trunk feat\n")
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_stage_with_git_config_default_range(self, mock_svn_cmd):
+        """Verify git2svn stage with no ref arguments falls back to git2svn.defaultRange."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        base_file = self.git_path / "stage_base.txt"
+        base_file.write_text("stage base\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "stage base"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        feat_file = self.git_path / "stage_default.txt"
+        feat_file.write_text("staged content\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "staged feat"], cwd=self.git_path, check=True)
+        feat_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        subprocess.run(
+            ["git", "config", "git2svn.defaultRange", f"{base_hash}..{feat_hash}"], cwd=self.git_path, check=True
+        )
+
+        # Run stage without ref
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "--svn-dir",
+                str(self.svn_path),
+                "stage",
+            ]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual((self.svn_path / "stage_default.txt").read_text(), "staged content\n")
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_eol_preservation_on_crlf_target(self, mock_svn_cmd):
         """Verify git apply with an LF patch preserves CRLF line endings on CRLF target file."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")

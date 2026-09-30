@@ -102,7 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser_stage.add_argument(
-        "ref1", help="Commit hash, branch, or start ref (e.g. 'abc1234' or 'main..feature' or 'main')"
+        "ref1",
+        nargs="?",
+        default=None,
+        help="Commit hash, branch, or start ref (e.g. 'abc1234' or 'main..feature' or 'main')",
     )
     parser_stage.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
     parser_stage.add_argument(
@@ -249,11 +252,32 @@ def main(argv: Optional[List[str]] = None) -> int:
     patcher = Patcher(svn_dir, dry_run=dry_run)
     sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=dry_run, auto_update=auto_update)
 
+    # Fallback to git2svn.defaultRange if ref1 is omitted
+    ref1 = args.ref1
+    ref2 = getattr(args, "ref2", None)
+    if not ref1 and args.command in ("stage", "replay"):
+        # Replay actions (--continue, --abort, --skip) do not need ref1
+        if args.command == "replay" and getattr(args, "replay_action", None):
+            pass
+        else:
+            default_range = git_repo.get_config("git2svn.defaultRange")
+            if default_range:
+                ref1 = default_range
+                ref2 = None
+                logger.info("Using configured default range from git2svn.defaultRange: '%s'", default_range)
+
     try:
         if args.command == "stage":
+            if not ref1:
+                print(
+                    "Error: stage requires a commit or range (e.g. 'git2svn stage main..feature') "
+                    "or 'git config git2svn.defaultRange <range>'.",
+                    file=sys.stderr,
+                )
+                return 1
             sync_mgr.stage(
-                args.ref1,
-                args.ref2,
+                ref1,
+                ref2,
                 use_copy=use_copy,
                 snapshot=getattr(args, "snapshot", False),
             )
@@ -266,13 +290,14 @@ def main(argv: Optional[List[str]] = None) -> int:
             elif action == "skip":
                 sync_mgr.replay_skip()
             else:
-                if not args.ref1:
+                if not ref1:
                     print(
-                        "Error: replay requires a commit or range unless using --continue, --abort, or --skip.",
+                        "Error: replay requires a commit or range unless using --continue, --abort, or --skip. "
+                        "You can also configure a default range with 'git config git2svn.defaultRange <range>'.",
                         file=sys.stderr,
                     )
                     return 1
-                sync_mgr.replay(args.ref1, args.ref2)
+                sync_mgr.replay(ref1, ref2)
         else:
             return 1
     except subprocess.CalledProcessError as e:

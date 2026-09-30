@@ -20,18 +20,21 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 | `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
 | `--copy` | — | — | `git2svn.copy` | `False` | Extract exact binary snapshots directly from Git object DB. |
 | `--update` | `-u` | — | `git2svn.autoUpdate` | `False` | Run `svn update` after `replay` to bump local base revision to `HEAD`. |
+| `<ref1> [ref2]` | — | — | `git2svn.defaultRange` | None | Default revision or range (e.g. `svn-mirror/trunk..trunk`) when omitted from CLI. |
 
 ### 1.1 Persisting Settings via `git config`
 
-To avoid typing `--svn-dir` or setting environment variables on every run, configure options directly in your repository's `.git/config`:
+To avoid typing `--svn-dir` or specifying commit ranges on every run, configure options directly in your repository's `.git/config`:
 
 ```bash
 # Configure SVN working copy path for this repository:
 git config git2svn.svnDir "C:/Projects/my-svn-checkout"
 
-# Optionally configure defaults for copy extraction or dry-run:
-git config git2svn.copy true
-git config git2svn.dryRun false
+# Configure default integration range:
+git config git2svn.defaultRange "svn-mirror/trunk..trunk"
+
+# Automatically update SVN working copy after replay:
+git config git2svn.autoUpdate true
 ```
 
 #### Precedence Hierarchy:
@@ -276,6 +279,13 @@ Replay the uncommitted range from the mirror base to `trunk`:
 git2svn replay -u svn-mirror/trunk..trunk
 ```
 *(The `-u` flag automatically runs `svn update` upon completion, ensuring your SVN working copy base revision is bumped to `HEAD`.)*
+
+> [!TIP]
+> If you configure `git config git2svn.defaultRange "svn-mirror/trunk..trunk"`, you can simply run:
+> ```bash
+> git2svn replay
+> ```
+> regardless of what feature branch you have checked out, safely and automatically shipping only the commits on `trunk`!
 
 #### 5. Sync Mirror & Clean Up
 Trigger your inbound SVN mirror tool and fast-forward your local `trunk` to match the official upstream history:
