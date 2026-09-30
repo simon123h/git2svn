@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git2svn"
+version = "0.1.0"
+description = "CLI utility to synchronize changes from a local Git repository to a local SVN working copy"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [
+    { name = "Simon" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Version Control",
+]
+
+[project.scripts]
+git2svn = "git2svn:main"
