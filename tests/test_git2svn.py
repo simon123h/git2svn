@@ -806,6 +806,61 @@ class TestSynchronizer(unittest.TestCase):
         self.assertIn(["rm", "to_delete.txt"], called_args)
         self.assertIn(["add", "brand_new.txt", "--parents"], called_args)
 
+    def test_replay_skip(self):
+        """Verify replay_skip clears current commit and continues with remaining."""
+        state_data = {
+            "current_commit": "abc",
+            "current_commit_msg": "skip me",
+            "remaining_commits": [],
+            "git_dir": str(self.git_path),
+        }
+        git2svn.save_replay_state(self.svn_path, state_data)
+        rej = self.svn_path / "bad.txt.rej"
+        rej.write_text("conflict rej")
+
+        with patch.object(git2svn.SvnWorkspace, "run_cmd") as mock_svn_cmd:
+            mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            self.sync_mgr.replay_skip()
+
+        self.assertIsNone(git2svn.load_replay_state(self.svn_path))
+        self.assertFalse(rej.exists())
+
+    def test_replay_continue_no_state_error(self):
+        """Verify replay_continue raises RuntimeError if no replay state exists."""
+        with self.assertRaises(RuntimeError):
+            self.sync_mgr.replay_continue()
+
+    def test_replay_abort_no_state_error(self):
+        """Verify replay_abort raises RuntimeError if no replay state exists."""
+        with self.assertRaises(RuntimeError):
+            self.sync_mgr.replay_abort()
+
+    def test_replay_skip_no_state_error(self):
+        """Verify replay_skip raises RuntimeError if no replay state exists."""
+        with self.assertRaises(RuntimeError):
+            self.sync_mgr.replay_skip()
+
+    def test_cli_verbose_exception(self):
+        """Verify verbose mode prints traceback on unhandled exception."""
+        with (
+            patch("git2svn.cli.Synchronizer.stage", side_effect=RuntimeError("boom")),
+            patch("traceback.print_exc") as mock_tb,
+            patch("sys.stderr"),
+        ):
+            res = git2svn.main(
+                [
+                    "--git-dir",
+                    str(self.git_path),
+                    "--svn-dir",
+                    str(self.svn_path),
+                    "--verbose",
+                    "stage",
+                    "HEAD",
+                ]
+            )
+            self.assertEqual(res, 1)
+            mock_tb.assert_called_once()
+
 
 class TestEolUtilities(unittest.TestCase):
     def setUp(self):
@@ -899,6 +954,90 @@ class TestEolUtilities(unittest.TestCase):
         self.assertEqual(git_repo.get_config("pull.ff"), "only")
         self.assertIn("git2svn replay", git_repo.get_config("alias.svn-push"))
         self.assertIn("git fetch svn-mirror", git_repo.get_config("alias.svn-pull"))
+
+    def test_setup_interactive_input(self):
+        """Verify git2svn setup prompts for svn path via input() when tty."""
+        svn_dir = self.path / "prompt_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        git_dir = self.path / "prompt_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value=str(svn_dir)):
+            res = git2svn.main(["--git-dir", str(git_dir), "setup"])
+            self.assertEqual(res, 0)
+            git_repo = git2svn.GitRepo(git_dir)
+            self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(svn_dir).replace("\\", "/"))
+
+    def test_setup_missing_svn_dir_error(self):
+        """Verify setup fails with exit code 1 when no svn_dir is provided and non-interactive."""
+        git_dir = self.path / "err_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("sys.stdin.isatty", return_value=False), patch("sys.stderr"):
+            res = git2svn.main(["--git-dir", str(git_dir), "setup"])
+            self.assertEqual(res, 1)
+
+    def test_setup_invalid_svn_dir(self):
+        """Verify setup fails with exit code 1 when path is not an SVN working copy."""
+        not_svn = self.path / "not_svn"
+        not_svn.mkdir()
+        git_dir = self.path / "err_git2"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("sys.stderr"):
+            res = git2svn.main(["--git-dir", str(git_dir), "setup", str(not_svn)])
+            self.assertEqual(res, 1)
+
+    def test_cli_missing_ref_errors(self):
+        """Verify stage and replay exit with code 1 if ref is missing and no defaultRange configured."""
+        svn_dir = self.path / "cli_err_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        git_dir = self.path / "cli_err_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("sys.stderr"):
+            self.assertEqual(git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage"]), 1)
+            self.assertEqual(git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "replay"]), 1)
+
+    def test_cli_missing_svn_dir(self):
+        """Verify error when SVN dir is completely omitted and unconfigured for stage."""
+        git_dir = self.path / "cli_no_svn_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch.dict("os.environ", {}, clear=True), patch("sys.stderr"):
+            self.assertEqual(git2svn.main(["--git-dir", str(git_dir), "stage", "HEAD"]), 1)
+
+    def test_cli_invalid_git_dir(self):
+        """Verify error when git dir is not a git repo."""
+        not_git = self.path / "not_git"
+        not_git.mkdir()
+        with patch("sys.stderr"):
+            self.assertEqual(git2svn.main(["--git-dir", str(not_git), "stage", "HEAD"]), 1)
+
+    def test_find_svn_binary_windows_discovery(self):
+        """Verify find_svn_binary falls back to candidate paths when on win32."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("sys.platform", "win32"),
+            patch.object(Path, "is_file") as mock_is_file,
+        ):
+            # When candidate exists
+            mock_is_file.return_value = True
+            bin_path = git2svn.svn.find_svn_binary()
+            self.assertIn("svn.exe", bin_path)
+
+            # When no candidate exists
+            mock_is_file.return_value = False
+            self.assertEqual(git2svn.svn.find_svn_binary(), "svn")
 
 
 if __name__ == "__main__":
