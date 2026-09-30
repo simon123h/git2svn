@@ -196,3 +196,14 @@ ruff format .
 # Check formatting without modifying
 ruff format --check .
 ```
+
+---
+
+## 6. Architecture & Documentation
+
+Comprehensive documentation-as-code is maintained in the [`docs/`](file:///home/simon/Code/git2svn/docs) folder:
+
+* **[Requirements Specification (req42)](file:///home/simon/Code/git2svn/docs/req42.md):** Detailed stakeholders, functional requirements (`stage`, `replay`, `--copy`, `--snapshot`), non-functional requirements, and constraints.
+* **[Architecture Documentation (arc42)](file:///home/simon/Code/git2svn/docs/arc42.md):** Architectural design, package building blocks, runtime sequence diagrams, and architecture decisions (ADRs).
+* **[Contributing Guidelines (CONTRIBUTING.md)](file:///home/simon/Code/git2svn/CONTRIBUTING.md):** Development setup, commit message format (Conventional Commits), coding standards, and PR workflows.
+
