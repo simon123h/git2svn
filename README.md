@@ -56,8 +56,21 @@ flowchart LR
 
     ST --> P --> E --> S
     ST -.->|--copy| C --> E --> S
-    RP --> P --> E --> S --> CM
 ```
+
+### 2.2 Package Modularization
+
+The codebase is cleanly decoupled into single-responsibility modules:
+
+| Module | Responsibility | Analogy (Spring / Clean Arch) |
+| :--- | :--- | :--- |
+| [`git2svn.cli`](file:///home/simon/Code/git2svn/git2svn/cli.py) | CLI argument parsing (`argparse`), banners, error handling, entrypoint | Controller |
+| [`git2svn.core`](file:///home/simon/Code/git2svn/git2svn/core.py) | `Synchronizer`: orchestrates `stage`, `replay`, and state transitions | Application Service |
+| [`git2svn.git`](file:///home/simon/Code/git2svn/git2svn/git.py) | `GitRepo`: interacts with Git object DB, diffs, commits, tree blobs | Git Repository Adapter |
+| [`git2svn.svn`](file:///home/simon/Code/git2svn/git2svn/svn.py) | `SvnWorkspace`: executes Subversion operations (`add`, `rm`, `commit`) | SVN Repository Adapter |
+| [`git2svn.patcher`](file:///home/simon/Code/git2svn/git2svn/patcher.py) | `Patcher`: executes `git apply` with whitespace tolerance and rejects | Domain Engine |
+| [`git2svn.eol`](file:///home/simon/Code/git2svn/git2svn/eol.py) | Detection and normalization of line endings (`CRLF` vs `LF`) | Domain Utilities |
+| [`git2svn.state`](file:///home/simon/Code/git2svn/git2svn/state.py) | Replay state persistence (`git2svn-replay.json`) & conflict cleanup | State Store |
 
 ---
 
