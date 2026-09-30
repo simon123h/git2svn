@@ -3,7 +3,8 @@
 <p align="center">
   <a href="https://github.com/simon123h/git2svn/actions/workflows/ci.yml"><img src="https://github.com/simon123h/git2svn/actions/workflows/ci.yml/badge.svg?branch=main" alt="Build Status"></a>
   <a href="https://codecov.io/gh/simon123h/git2svn"><img src="https://codecov.io/gh/simon123h/git2svn/branch/main/graph/badge.svg" alt="Coverage"></a>
-  <img src="https://img.shields.io/badge/Python-v3.8+-3776AB?logo=python&logoColor=white" alt="Python Version">
+  <a href="https://pypi.org/project/git2svn/"><img src="https://img.shields.io/pypi/v/git2svn?color=blue" alt="PyPI Version"></a>
+  <img src="https://img.shields.io/badge/Python-v3.11+-3776AB?logo=python&logoColor=white" alt="Python Version">
   <img src="https://img.shields.io/endpoint?url=https%3A%2F%2Ftokei.kojix2.net%2Fbadge%2Fgithub%2Fsimon123h%2Fgit2svn%2Flines" alt="Lines of Code">
   <a href="https://github.com/simon123h/git2svn/releases"><img src="https://badgen.net/github/release/simon123h/git2svn?color=orange" alt="Latest Release"></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a>
@@ -29,18 +30,22 @@ A lightweight, zero-dependency Python 3 CLI utility to bridge local Git developm
 
 ### Installation
 
-No package installation required. Run directly with Python 3:
+Install via `pipx` (recommended) or `pip`:
 
 ```bash
-# Clone the repository
+# Using pipx (isolated global CLI command):
+pipx install git2svn
+
+# Or via standard pip:
+pip install git2svn
+```
+
+Alternatively, run directly from source without installing:
+
+```bash
 git clone https://github.com/simon123h/git2svn.git
 cd git2svn
-
-# (Optional) Install CLI globally or into your virtual environment:
-pip install .
-
-# Or install the latest release wheel directly from GitHub Releases:
-# pip install https://github.com/simon123h/git2svn/releases/latest/download/git2svn-<version>-py3-none-any.whl
+python3 -m git2svn --help
 ```
 
 ### Basic Commands

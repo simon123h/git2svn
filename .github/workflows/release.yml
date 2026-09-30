@@ -17,22 +17,22 @@ on:
           - major
           - custom
       custom_version:
-        description: 'Custom Version (only if "custom" selected above, e.g. v0.2.0)'
+        description: 'Custom Version (only if "custom" selected above, e.g. v0.3.1)'
         required: false
         default: ''
 
 permissions:
   contents: write
+  id-token: write  # Required for PyPI Trusted Publishing (OIDC)
 
 jobs:
   tag-release:
-    name: Resolve / Create Release Tag
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve_tag.outputs.tag }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -44,10 +44,10 @@ jobs:
             TAG="${{ github.ref_name }}"
             echo "Triggered by tag push: $TAG"
           else
-            # Triggered via workflow_dispatch -> compute next semver
+            # Triggered via workflow_dispatch button -> compute next semver
             LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
             if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG="v0.1.0"
+              LATEST_TAG="v0.3.0"
             fi
             echo "Latest stable tag: $LATEST_TAG"
 
@@ -84,13 +84,12 @@ jobs:
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-  build-and-release:
-    name: Build Wheel & Create GitHub Release
+  build-and-publish:
     needs: tag-release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ needs.tag-release.outputs.tag }}
@@ -100,25 +99,26 @@ jobs:
           git fetch --tags --force
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install Build Dependencies
+      - name: Install Build Tools
         run: |
-          python -m pip install --upgrade pip
           pip install build
 
-      - name: Build Python Package (Wheel & Sdist)
+      - name: Inject Version into pyproject.toml and __init__.py
         env:
           TAG: ${{ needs.tag-release.outputs.tag }}
         run: |
-          # Strip leading 'v' for versioning in package metadata
           VERSION="${TAG#v}"
-          echo "Building wheel and source distribution for version: $VERSION"
-          # Update version dynamically in pyproject.toml and git2svn/__init__.py for the release build
+          echo "Building release version: $VERSION"
+          # Update version in pyproject.toml and __init__.py for distribution build
           sed -i -E "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
           sed -i -E "s/^__version__ = \".*\"/__version__ = \"$VERSION\"/" git2svn/__init__.py
+
+      - name: Build Wheel & Sdist
+        run: |
           python -m build
 
       - name: Create GitHub Release
@@ -127,15 +127,13 @@ jobs:
           TAG: ${{ needs.tag-release.outputs.tag }}
         run: |
           EXTRA_FLAGS=()
-
-          if [[ "$TAG" =~ (alpha|beta|rc|dev|[0-9]+[ab][0-9]+) ]]; then
+          if [[ "$TAG" =~ (alpha|beta|rc|dev) ]]; then
             EXTRA_FLAGS+=(--prerelease)
+          fi
+
+          START_TAG=$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${TAG}$" | head -n 1 || true)
+          if [ -z "$START_TAG" ]; then
             START_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
-          else
-            START_TAG=$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^${TAG}$" | head -n 1 || true)
-            if [ -z "$START_TAG" ]; then
-              START_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
-            fi
           fi
 
           RANGE="${START_TAG}..${TAG}"
@@ -150,11 +148,9 @@ jobs:
 
           FEATS=$(git log "$RANGE" --grep="^feat" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
           FIXES=$(git log "$RANGE" --grep="^fix" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
-          MAINT=$(git log "$RANGE" --grep="^chore" --grep="^perf" --grep="^refactor" --grep="^docs" --grep="^ci" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
-          OTHER=$(git log "$RANGE" --invert-grep --grep="^feat" --grep="^fix" --grep="^chore" --grep="^perf" --grep="^refactor" --grep="^docs" --grep="^ci" --grep="^style" --grep="^test" --grep="^Merge" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
+          MAINT=$(git log "$RANGE" --grep="^chore" --grep="^perf" --grep="^refactor" --grep="^docs" --pretty=format:"* %s ([%h]($REPO_URL/commit/%H))" || true)
 
           HAS_CONTENT=false
-
           if [ -n "$FEATS" ]; then
             echo "### 🚀 Features" >> "$NOTES_FILE"
             echo "$FEATS" >> "$NOTES_FILE"
@@ -170,15 +166,8 @@ jobs:
           fi
 
           if [ -n "$MAINT" ]; then
-            echo "### 🧰 Maintenance & Dependencies" >> "$NOTES_FILE"
+            echo "### 🧰 Maintenance & Documentation" >> "$NOTES_FILE"
             echo "$MAINT" >> "$NOTES_FILE"
-            echo "" >> "$NOTES_FILE"
-            HAS_CONTENT=true
-          fi
-
-          if [ -n "$OTHER" ]; then
-            echo "### 📦 Other Changes" >> "$NOTES_FILE"
-            echo "$OTHER" >> "$NOTES_FILE"
             echo "" >> "$NOTES_FILE"
             HAS_CONTENT=true
           fi
@@ -192,14 +181,15 @@ jobs:
             echo "**Full Changelog**: $REPO_URL/compare/${START_TAG}...${TAG}" >> "$NOTES_FILE"
           fi
 
-          echo "" >> "$NOTES_FILE"
-          echo "### 📥 Installation from Release Asset" >> "$NOTES_FILE"
-          echo '```bash' >> "$NOTES_FILE"
-          echo '# Install wheel directly via pip:' >> "$NOTES_FILE"
-          echo "pip install https://github.com/${{ github.repository }}/releases/download/${TAG}/git2svn-${TAG#v}-py3-none-any.whl" >> "$NOTES_FILE"
-          echo '```' >> "$NOTES_FILE"
-
           gh release create "$TAG" dist/* \
             --title "$TAG" \
             --notes-file "$NOTES_FILE" \
             "${EXTRA_FLAGS[@]}"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        continue-on-error: true  # Allows pipeline to succeed even before PyPI Trusted Publishing is registered
+        with:
+          packages-dir: dist/
+          skip-existing: true
+          print-hash: true
