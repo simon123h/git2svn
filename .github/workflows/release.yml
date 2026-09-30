@@ -105,20 +105,14 @@ jobs:
 
       - name: Install Build Tools
         run: |
-          pip install build
+          pip install build setuptools-scm
 
-      - name: Inject Version into pyproject.toml and __init__.py
+      - name: Build Wheel & Sdist
         env:
           TAG: ${{ needs.tag-release.outputs.tag }}
         run: |
-          VERSION="${TAG#v}"
-          echo "Building release version: $VERSION"
-          # Update version in pyproject.toml and __init__.py for distribution build
-          sed -i -E "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
-          sed -i -E "s/^__version__ = \".*\"/__version__ = \"$VERSION\"/" git2svn/__init__.py
-
-      - name: Build Wheel & Sdist
-        run: |
+          export SETUPTOOLS_SCM_PRETEND_VERSION="${TAG#v}"
+          echo "Building package for release version: $SETUPTOOLS_SCM_PRETEND_VERSION"
           python -m build
 
       - name: Create GitHub Release

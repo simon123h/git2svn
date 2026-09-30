@@ -19,7 +19,10 @@ from .state import (
 )
 from .svn import SvnWorkspace
 
-__version__ = "0.4.0"
+try:
+    from ._version import __version__
+except ImportError:
+    __version__ = "0.0.0.dev0"
 
 
 def get_version() -> str:

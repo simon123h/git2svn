@@ -10,3 +10,4 @@ dist/
 .coverage
 coverage.xml
 htmlcov/
+git2svn/_version.py

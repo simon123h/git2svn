@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=64.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "git2svn"
-version = "0.4.0"
+dynamic = ["version"]
 description = "CLI utility to synchronize changes from a local Git repository to a local SVN working copy"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -38,10 +38,17 @@ Changelog = "https://github.com/simon123h/git2svn/releases"
 dev = [
     "coverage>=7.0.0",
     "ruff>=0.8.0",
+    "setuptools-scm>=8.0",
 ]
 
 [project.scripts]
 git2svn = "git2svn.cli:main"
+
+[tool.setuptools_scm]
+write_to = "git2svn/_version.py"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
+
 
 [tool.ruff]
 line-length = 120
