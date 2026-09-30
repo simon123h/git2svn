@@ -228,6 +228,12 @@ sequenceDiagram
 * State persistence records current failed commit hash, commit message, and remaining queue in `.svn/git2svn-replay.json`.
 * `replay --continue` guards against premature resumption by enforcing that all `*.rej` and `*.orig` files are resolved and removed.
 
+### 8.3 Integration Branch Pattern (Git-to-SVN Inbound/Outbound Sync)
+* Inbound SVN changes are mirrored incrementally to a tracking branch (e.g. `svn-mirror/trunk`) via `svn2git`/`all-fast-export`.
+* Development occurs on local topic branches, which are integrated via fast-forward or squash into a local `trunk` staging branch.
+* `git2svn replay -u svn-mirror/trunk..trunk` performs the outbound synchronization to SVN.
+* Following replay, `trunk` is reset to the authoritative SVN mirror (`git reset --hard svn-mirror/trunk`), eliminating drift and merge conflicts.
+
 ---
 
 ## 9. Architecture Decisions (ADR Summary)
