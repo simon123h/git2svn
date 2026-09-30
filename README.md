@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/simon123h/git2svn/actions/workflows/ci.yml"><img src="https://github.com/simon123h/git2svn/actions/workflows/ci.yml/badge.svg?branch=main" alt="Build Status"></a>
-  <img src="https://img.shields.io/badge/Python-v3.8+-3776AB?logo=python&logoColor=white" alt="Python Version">
+  <img src="https://img.shields.io/badge/Python-v3.11+-3776AB?logo=python&logoColor=white" alt="Python Version">
   <img src="https://img.shields.io/endpoint?url=https%3A%2F%2Ftokei.kojix2.net%2Fbadge%2Fgithub%2Fsimon123h%2Fgit2svn%2Flines" alt="Lines of Code">
   <a href="https://github.com/simon123h/git2svn/releases"><img src="https://badgen.net/github/release/simon123h/git2svn?color=orange" alt="Latest Release"></a>
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a>

@@ -9,7 +9,7 @@ Thank you for contributing to `git2svn`! This document outlines our development 
 `git2svn` is built entirely on the Python 3 standard library with zero runtime dependencies. Only development tooling (Ruff) is required.
 
 ### 1.1 Requirements
-* Python `>= 3.8`
+* Python `>= 3.11`
 * `git` CLI (standard installation)
 * `svn` CLI (Apache Subversion command-line client)
 * `ruff` for code formatting and linting
@@ -45,7 +45,7 @@ All commit messages **must** strictly adhere to the [Conventional Commits](https
 * **Example:** `feat(patch): replace patch with git apply and add EOL normalization`
 
 ### 2.2 Code Formatting & Linting
-We use [Ruff](https://astral.sh/ruff) configured in `pyproject.toml` (target Python 3.8+, line length 120):
+We use [Ruff](https://astral.sh/ruff) configured in `pyproject.toml` (target Python 3.11+, line length 120):
 ```bash
 # Check code for lint errors and auto-fix what's safe
 ruff check --fix .

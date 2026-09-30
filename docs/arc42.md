@@ -236,4 +236,4 @@ sequenceDiagram
 * **ADR-2: `git apply` over GNU `patch`:** Eliminates external Windows dependency on `patch.exe` and natively handles Git diff extensions.
 * **ADR-3: Post-Patch EOL Normalization:** Reconciles mixed newline styles dynamically without mutating uncommitted files before patching.
 * **ADR-4: `--snapshot` Full Tree Alignment:** Provides an escape hatch when branches diverge or Git base revision is unknown.
-* **ADR-5: Zero External Dependencies:** Preserves lightweight portable design runnable anywhere with Python 3.8+.
+* **ADR-5: Zero External Dependencies:** Preserves lightweight portable design runnable anywhere with Python 3.11+.

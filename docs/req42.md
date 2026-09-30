@@ -90,7 +90,7 @@ In legacy software development environments, enterprise Subversion (SVN) monorep
 
 | ID | Category | Requirement | Verification |
 | :--- | :--- | :--- | :--- |
-| **NFR-1** | **Portability** | Must run on standard Python 3.8+ on Linux, macOS, and Windows. | Tested on Linux & Windows |
+| **NFR-1** | **Portability** | Must run on standard Python 3.11+ on Linux, macOS, and Windows. | Tested on Linux, macOS & Windows |
 | **NFR-2** | **Zero Dependencies** | Runtime execution MUST NOT require `pip install` packages; standard library only. | Inspected `pyproject.toml` |
 | **NFR-3** | **No GNU patch Dependency** | Must eliminate requirements for GNU `patch` / `patch.exe` on Windows by relying on standard `git apply`. | Automated tests |
 | **NFR-4** | **Safety & Atomicity** | No SVN operation may leave untracked state or corrupt `.svn` metadata directories. | State tests |
