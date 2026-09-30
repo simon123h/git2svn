@@ -476,6 +476,95 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual((self.svn_path / "cli_test.txt").read_text(), "cli test\n")
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_eol_preservation_on_crlf_target(self, mock_svn_cmd):
+        """Verify git apply with an LF patch preserves CRLF line endings on CRLF target file."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # SVN checkout has CRLF file
+        svn_file = self.svn_path / "crlf_file.txt"
+        svn_file.write_bytes(b"line 1\r\nline 2\r\nline 3\r\n")
+
+        # Git mirror has LF file
+        git_file = self.git_path / "crlf_file.txt"
+        git_file.write_bytes(b"line 1\nline 2\nline 3\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+
+        # Modify file in Git with LF line endings
+        git_file.write_bytes(b"line 1\nline 2 modified\nline 3\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "modify in git (LF)"], cwd=self.git_path, check=True)
+        c_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        self.sync_mgr.stage(c_hash)
+
+        # Content in SVN should be updated and remain cleanly CRLF without mixed endings
+        content = svn_file.read_bytes()
+        self.assertEqual(content, b"line 1\r\nline 2 modified\r\nline 3\r\n")
+        self.assertNotIn(b"\r\r\n", content)
+        # Ensure no orphan \n exists
+        self.assertEqual(content.count(b"\n"), content.count(b"\r\n"))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_copy_mode_preserves_target_eol(self, mock_svn_cmd):
+        """Verify --copy mode preserves target CRLF line endings when overwriting."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        svn_file = self.svn_path / "copy_crlf.txt"
+        svn_file.write_bytes(b"line 1\r\nline 2\r\n")
+
+        git_file = self.git_path / "copy_crlf.txt"
+        git_file.write_bytes(b"line 1\nline 2\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+
+        git_file.write_bytes(b"line 1\nline 2 updated\nline 3\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "update"], cwd=self.git_path, check=True)
+        c_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        self.sync_mgr.stage(c_hash, use_copy=True)
+
+        content = svn_file.read_bytes()
+        self.assertEqual(content, b"line 1\r\nline 2 updated\r\nline 3\r\n")
+
+
+class TestEolUtilities(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp_dir.name)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_detect_file_eol(self):
+        f_crlf = self.path / "crlf.txt"
+        f_crlf.write_bytes(b"a\r\nb\r\nc\r\n")
+        self.assertEqual(git2svn.detect_file_eol(f_crlf), b"\r\n")
+
+        f_lf = self.path / "lf.txt"
+        f_lf.write_bytes(b"a\nb\nc\n")
+        self.assertEqual(git2svn.detect_file_eol(f_lf), b"\n")
+
+        f_empty = self.path / "empty.txt"
+        f_empty.write_bytes(b"")
+        self.assertIsNone(git2svn.detect_file_eol(f_empty))
+
+        f_bin = self.path / "bin.dat"
+        f_bin.write_bytes(b"foo\0bar\r\n")
+        self.assertIsNone(git2svn.detect_file_eol(f_bin))
+
+    def test_normalize_file_eol(self):
+        f = self.path / "mixed.txt"
+        # Mixed: CRLF and LF in same file
+        f.write_bytes(b"line 1\r\nline 2\nline 3\r\n")
+        git2svn.normalize_file_eol(f, target_eol=b"\r\n")
+        self.assertEqual(f.read_bytes(), b"line 1\r\nline 2\r\nline 3\r\n")
+
+        git2svn.normalize_file_eol(f, target_eol=b"\n")
+        self.assertEqual(f.read_bytes(), b"line 1\nline 2\nline 3\n")
+
 
 if __name__ == "__main__":
     unittest.main()

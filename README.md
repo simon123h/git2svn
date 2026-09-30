@@ -14,7 +14,10 @@ This utility bridges the gap when pushing work back to SVN:
 * **SVN Workspace:** Standard local SVN working copy used for code review and committing back to the upstream SVN server (via CLI or TortoiseSVN).
 
 ### 1.2 Core Architectural Principles
-* **Python 3 Standard Library:** Zero external dependencies (`argparse`, `subprocess`, `shutil`, `pathlib`).
+* **Zero External Dependencies:** Built entirely with Python 3 and standard `git` and `svn` CLI tools. No GNU `patch` binary installation required.
+* **Smart Line Ending Normalization (CRLF / LF):**
+  * Applies patches using `git apply --ignore-whitespace --unsafe-paths --reject`.
+  * Detects each SVN file's target newline convention (`CRLF` vs `LF`) and normalizes all modified lines post-patch, preventing Subversion `E135000: Inconsistent line ending style` commit rejections.
 * **Clean Separation of Intent:**
   * **`stage`:** Never commits. Prepares and stages changes (`svn add --parents`, `svn rm`) in the SVN workspace so you can inspect them via TortoiseSVN before committing.
   * **`replay`:** Always commits. Ports each Git commit into SVN history with its original commit message and stateful conflict pause/resume.
@@ -27,7 +30,8 @@ This utility bridges the gap when pushing work back to SVN:
 ```mermaid
 flowchart TD
     Git[Git Workspace] -->|git diff / name-status| Bridge[git2svn CLI]
-    Bridge -->|patch -p1 or shutil.copy2| SVN[SVN Working Copy]
+    Bridge -->|git apply or git object DB| SVN[SVN Working Copy]
+    Bridge -->|EOL normalization CRLF/LF| SVN
     Bridge -->|svn add --parents / svn rm| SVN
     SVN -->|Review & Manual svn commit| Upstream[(SVN Server)]
     Bridge -.->|replay auto svn commit| Upstream
@@ -43,15 +47,16 @@ flowchart LR
     end
 
     subgraph Operations
-        P["Diff & patch -p1"]
-        C["shutil.copy2 (--copy)"]
+        P["git apply --ignore-whitespace"]
+        C["Git Object Extract (--copy)"]
+        E["EOL Normalization"]
         S["SVN Staging (add/rm)"]
         CM["svn commit (Git msg)"]
     end
 
-    ST --> P --> S
-    ST -.->|--copy| C --> S
-    RP --> P --> S --> CM
+    ST --> P --> E --> S
+    ST -.->|--copy| C --> E --> S
+    RP --> P --> E --> S --> CM
 ```
 
 ---
@@ -104,10 +109,10 @@ Prepares changes in the SVN workspace **without committing**, ready for review i
   # Stage a range using two arguments
   ./git2svn.py stage master feature/login --svn-dir /path/to/svn
   ```
-* **Binary / Conflict Fallback (`--copy`):**
-  Uses Python's `shutil` to physically copy modified/added files instead of `patch -p1`.
+* **Binary / Direct Extract Fallback (`--copy`):**
+  Extracts exact binary snapshots directly from the Git object database instead of applying diffs.
   ```bash
-  # Brute-force file copy (ideal for binaries, images, or heavy refactors)
+  # Extract files directly from Git object DB (ideal for binaries, images, or large refactors)
   ./git2svn.py stage master..feature/assets --copy --svn-dir /path/to/svn
   ```
 

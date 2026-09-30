@@ -25,6 +25,67 @@ from typing import Dict, List, Optional, Tuple
 logger = logging.getLogger("git2svn")
 
 
+def detect_file_eol(file_path: Path) -> Optional[bytes]:
+    """
+    Detect the predominant newline style of a file (b'\\r\\n' vs b'\\n').
+    Returns None if the file does not exist, is empty, has no newlines, or is binary.
+    """
+    if not file_path.is_file() or file_path.is_symlink():
+        return None
+    try:
+        data = file_path.read_bytes()
+    except OSError:
+        return None
+
+    if b"\0" in data[:4096]:
+        return None  # Likely binary file
+
+    crlf_count = data.count(b"\r\n")
+    lf_count = data.count(b"\n") - crlf_count
+
+    if crlf_count > lf_count:
+        return b"\r\n"
+    if lf_count > 0:
+        return b"\n"
+    return None
+
+
+def normalize_file_eol(file_path: Path, target_eol: Optional[bytes] = None) -> None:
+    """
+    Normalize all line endings in file_path to target_eol (b'\\r\\n' or b'\\n').
+    If target_eol is None, detects predominant newline in file_path (defaults to b'\\n').
+    Skips binary files and symlinks.
+    """
+    if not file_path.is_file() or file_path.is_symlink():
+        return
+    try:
+        data = file_path.read_bytes()
+    except OSError:
+        return
+
+    if b"\0" in data[:4096]:
+        return  # Binary file
+
+    if target_eol is None:
+        crlf_count = data.count(b"\r\n")
+        lf_count = data.count(b"\n") - crlf_count
+        target_eol = b"\r\n" if crlf_count > lf_count else b"\n"
+
+    # Normalize all line breaks to \n first, then to target_eol if \r\n
+    unified = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    if target_eol == b"\r\n":
+        normalized = unified.replace(b"\n", b"\r\n")
+    else:
+        normalized = unified
+
+    if normalized != data:
+        try:
+            file_path.write_bytes(normalized)
+            logger.debug("Normalized EOL in %s to %s", file_path, repr(target_eol.decode("ascii")))
+        except OSError as e:
+            logger.warning("Could not normalize line endings for %s: %s", file_path, e)
+
+
 def find_conflict_artifacts(workspace_dir: Path) -> List[Path]:
     """Find all .rej and .orig files in workspace_dir (ignoring .svn)."""
     artifacts: List[Path] = []
@@ -434,42 +495,21 @@ class SvnWorkspace:
                 logger.debug("Modified file requires no SVN structural command: %s", change.path)
 
 
-def find_patch_binary() -> str:
-    """Find the patch executable, checking Git for Windows default paths if on Windows."""
-    found = shutil.which("patch")
-    if found:
-        return found
-    if sys.platform == "win32":
-        git_path = shutil.which("git")
-        if git_path:
-            git_dir = Path(git_path).resolve().parent
-            candidates = [
-                git_dir.parent / "usr" / "bin" / "patch.exe",
-                git_dir / "patch.exe",
-                Path("C:/Program Files/Git/usr/bin/patch.exe"),
-                Path("C:/Program Files (x86)/Git/usr/bin/patch.exe"),
-            ]
-            for c in candidates:
-                if c.is_file():
-                    return str(c)
-    return "patch"
-
-
 class Patcher:
-    """Wrapper to apply diffs using patch -p1."""
+    """Wrapper to apply diffs using git apply."""
 
-    def __init__(self, target_dir: Path, patch_bin: Optional[str] = None, dry_run: bool = False):
+    def __init__(self, target_dir: Path, git_bin: str = "git", dry_run: bool = False):
         self.target_dir = target_dir.resolve()
-        self.patch_bin = patch_bin or find_patch_binary()
+        self.git_bin = git_bin
         self.dry_run = dry_run
 
     def apply_diff(self, diff_content: str) -> None:
-        """Apply unified diff text to target_dir using patch -p1."""
+        """Apply unified diff text to target_dir using git apply."""
         if not diff_content.strip():
             logger.info("Diff is empty. Nothing to patch.")
             return
 
-        cmd = [self.patch_bin, "-p1", "--batch", "--binary"]
+        cmd = [self.git_bin, "apply", "--ignore-whitespace", "--unsafe-paths", "--reject"]
         if self.dry_run:
             print(f"[DRY-RUN] (in {self.target_dir}) { ' '.join(cmd) } << EOF\n{diff_content.strip()[:200]}...\nEOF")
             return
@@ -484,9 +524,9 @@ class Patcher:
         )
 
         if proc.returncode != 0:
-            logger.error("patch failed with code %d:\nSTDOUT:\n%s\nSTDERR:\n%s",
+            logger.error("git apply failed with code %d:\nSTDOUT:\n%s\nSTDERR:\n%s",
                          proc.returncode, proc.stdout, proc.stderr)
-            print(f"Error: patch command failed (exit code {proc.returncode}).", file=sys.stderr)
+            print(f"Error: git apply failed (exit code {proc.returncode}).", file=sys.stderr)
             if proc.stdout:
                 print(proc.stdout, file=sys.stderr)
             if proc.stderr:
@@ -494,8 +534,9 @@ class Patcher:
             print("Tip: Check for .rej reject files in the SVN workspace or use 'git2svn stage --copy' to copy files directly.", file=sys.stderr)
             raise subprocess.CalledProcessError(proc.returncode, cmd, proc.stdout, proc.stderr)
         else:
-            if proc.stdout:
-                logger.info("Patch applied successfully:\n%s", proc.stdout.strip())
+            if proc.stdout or proc.stderr:
+                msg = (proc.stdout + "\n" + proc.stderr).strip()
+                logger.info("Patch applied successfully:\n%s", msg)
 
 
 class Synchronizer:
@@ -713,7 +754,7 @@ class Synchronizer:
         logger.info("Replay completed successfully! All %d commits applied.", total_commits)
 
     def _patch_and_stage_commit(self, commit_hash: str) -> None:
-        """Extract diff for a single commit, apply using patch, and stage in SVN."""
+        """Extract diff for a single commit, apply using git apply, and stage in SVN."""
         parent = self.git.get_commit_parent(commit_hash)
         if parent:
             ref_spec = f"{parent}..{commit_hash}"
@@ -723,24 +764,63 @@ class Synchronizer:
             diff_text = self.git.get_diff_root(commit_hash)
             changes = self.git.get_name_status_root(commit_hash)
 
+        # Snapshot original EOL conventions of files to be modified/renamed before patching
+        target_eols: Dict[Path, Optional[bytes]] = {}
+        for change in changes:
+            if not change.is_deleted:
+                target_file = self.svn.workspace_dir / change.path
+                target_eols[change.path] = detect_file_eol(target_file)
+
         self._ensure_parent_dirs_for_changes(changes)
         self.patcher.apply_diff(diff_text)
+
+        # Normalize line endings of modified/added files in the SVN workspace
+        if not self.dry_run:
+            for change in changes:
+                if not change.is_deleted:
+                    target_file = self.svn.workspace_dir / change.path
+                    orig_eol = target_eols.get(change.path)
+                    normalize_file_eol(target_file, target_eol=orig_eol)
+
         self.svn.apply_structural_changes(changes)
 
     def _patch_and_stage_range(self, start_ref: str, end_ref: str) -> None:
-        """Extract diff between two references, apply using patch, and stage in SVN."""
+        """Extract diff between two references, apply using git apply, and stage in SVN."""
         ref_spec = f"{start_ref}..{end_ref}"
         diff_text = self.git.get_diff(ref_spec)
         changes = self.git.get_name_status(ref_spec)
 
+        # Snapshot original EOL conventions of files to be modified/renamed before patching
+        target_eols: Dict[Path, Optional[bytes]] = {}
+        for change in changes:
+            if not change.is_deleted:
+                target_file = self.svn.workspace_dir / change.path
+                target_eols[change.path] = detect_file_eol(target_file)
+
         self._ensure_parent_dirs_for_changes(changes)
         self.patcher.apply_diff(diff_text)
+
+        # Normalize line endings of modified/added files in the SVN workspace
+        if not self.dry_run:
+            for change in changes:
+                if not change.is_deleted:
+                    target_file = self.svn.workspace_dir / change.path
+                    orig_eol = target_eols.get(change.path)
+                    normalize_file_eol(target_file, target_eol=orig_eol)
+
         self.svn.apply_structural_changes(changes)
 
     def _copy_and_stage_range(self, base_ref: str, target_ref: str) -> None:
-        """Brute-force copy changed files using shutil, and stage in SVN."""
+        """Brute-force copy changed files using Git object DB, and stage in SVN."""
         ref_spec = f"{base_ref}..{target_ref}"
         changes = self.git.get_name_status(ref_spec)
+
+        # Snapshot original EOL conventions before overwriting
+        target_eols: Dict[Path, Optional[bytes]] = {}
+        for change in changes:
+            if not change.is_deleted:
+                target_file = self.svn.workspace_dir / change.path
+                target_eols[change.path] = detect_file_eol(target_file)
 
         # 1. Handle deleted files in SVN first
         for change in changes:
@@ -779,6 +859,9 @@ class Synchronizer:
                         os.symlink(link_target, dst_path)
                     else:
                         dst_path.write_bytes(content)
+                        orig_eol = target_eols.get(change.path)
+                        if orig_eol:
+                            normalize_file_eol(dst_path, target_eol=orig_eol)
 
         # 3. Stage added, renamed, and copied files in SVN
         for change in changes:
