@@ -3,6 +3,17 @@
 
 set -e
 
+# Check if currently on 'trunk' branch and ensure no merge commits are being created
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+if [ "$CURRENT_BRANCH" = "trunk" ]; then
+    if [ -f .git/MERGE_HEAD ]; then
+        echo "[git2svn pre-commit hook] ERROR: Merge commits are not permitted on 'trunk'." >&2
+        echo "[git2svn pre-commit hook] git2svn replay requires a strictly linear history." >&2
+        echo "[git2svn pre-commit hook] Please rebase your feature branch and use fast-forward: 'git merge --ff-only <branch>'" >&2
+        exit 1
+    fi
+fi
+
 # Check if ruff is available
 if command -v ruff >/dev/null 2>&1; then
     RUFF_CMD="ruff"
@@ -20,3 +31,4 @@ echo "[git2svn pre-commit hook] Checking code linting..."
 $RUFF_CMD check .
 
 echo "[git2svn pre-commit hook] All checks passed!"
+

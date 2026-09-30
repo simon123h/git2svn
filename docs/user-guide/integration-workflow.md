@@ -129,3 +129,25 @@ git merge --ff-only feature/login
 git svn-push
 ```
 
+---
+
+## 4. Linearity Guard (Preventing Accidental Merge Commits)
+
+`git2svn replay` strictly enforces linear histories because Subversion cannot represent multi-parent Git merge graphs.
+
+### Best Practice Configuration:
+To prevent Git from ever creating accidental merge commits when pulling:
+```bash
+# Enforce fast-forward only when pulling
+git config pull.ff only
+```
+
+### Pre-Commit Guard:
+The repository's [`.githooks/pre-commit`](../../.githooks/pre-commit) hook automatically checks whether a commit being created on `trunk` is a merge commit (detecting `.git/MERGE_HEAD`), aborting the commit immediately:
+```text
+[git2svn pre-commit hook] ERROR: Merge commits are not permitted on 'trunk'.
+[git2svn pre-commit hook] git2svn replay requires a strictly linear history.
+[git2svn pre-commit hook] Please rebase your feature branch and use fast-forward: 'git merge --ff-only <branch>'
+```
+
+
