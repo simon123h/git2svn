@@ -94,7 +94,12 @@ python3 -m unittest discover tests
 # Lint and format with Ruff
 ruff check --fix .
 ruff format .
+
+# Enable pre-commit hook
+git config core.hooksPath .githooks
+# or use pre-commit framework: pre-commit install
 ```
+
 
 ---
 

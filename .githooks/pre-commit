@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Git pre-commit hook to enforce code formatting and linting via ruff
+
+set -e
+
+# Check if ruff is available
+if command -v ruff >/dev/null 2>&1; then
+    RUFF_CMD="ruff"
+elif python3 -m ruff --version >/dev/null 2>&1; then
+    RUFF_CMD="python3 -m ruff"
+else
+    echo "[git2svn pre-commit hook] WARNING: 'ruff' not found in PATH or python environment. Skipping formatting checks."
+    exit 0
+fi
+
+echo "[git2svn pre-commit hook] Checking code formatting..."
+$RUFF_CMD format --check .
+
+echo "[git2svn pre-commit hook] Checking code linting..."
+$RUFF_CMD check .
+
+echo "[git2svn pre-commit hook] All checks passed!"
