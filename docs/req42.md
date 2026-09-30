@@ -90,11 +90,13 @@ In legacy software development environments, enterprise Subversion (SVN) monorep
 
 | ID | Category | Requirement | Verification |
 | :--- | :--- | :--- | :--- |
-| **NFR-1** | **Portability** | Must run on standard Python 3.11+ on Linux, macOS, and Windows. | Tested on Linux, macOS & Windows |
+| **NFR-1** | **Portability** | Must run on standard Python 3.8+ on Linux, macOS, and Windows. | Tested on Linux, macOS & Windows matrix |
 | **NFR-2** | **Zero Dependencies** | Runtime execution MUST NOT require `pip install` packages; standard library only. | Inspected `pyproject.toml` |
 | **NFR-3** | **No GNU patch Dependency** | Must eliminate requirements for GNU `patch` / `patch.exe` on Windows by relying on standard `git apply`. | Automated tests |
 | **NFR-4** | **Safety & Atomicity** | No SVN operation may leave untracked state or corrupt `.svn` metadata directories. | State tests |
 | **NFR-5** | **Scalability** | Standard diff/patch staging must execute in under 3 seconds for commits modifying up to 5,000 lines. | Benchmark / Profiling |
+| **NFR-6** | **Encoding Robustness** | Must handle UTF-8 characters (accents, umlauts) in commit logs and paths across Windows without `cp1252` encoding crashes. | Unit & E2E tests |
+| **NFR-7** | **Message Length Immunity** | `svn commit` MUST use temporary message files (`-F`) to avoid OS shell argument length limits (e.g. 8191 chars on `cmd.exe`). | Windows execution & E2E tests |
 
 ---
 
@@ -103,3 +105,4 @@ In legacy software development environments, enterprise Subversion (SVN) monorep
 * **CON-1:** The utility must be executable both as a standalone script (`./git2svn.py`) and as a modular package (`python3 -m git2svn` or installed console script).
 * **CON-2:** Replay state files MUST be stored inside `<svn_dir>/.svn/` to avoid polluting the working directory or appearing as unversioned files in SVN status.
 * **CON-3:** CLI options must be flexible in placement, supporting flags before or after subcommands.
+* **CON-4:** On Windows systems where `svn` is not in `PATH`, the utility MUST attempt to locate `svn.exe` in common default installation directories (TortoiseSVN, SlikSVN).

@@ -236,4 +236,7 @@ sequenceDiagram
 * **ADR-2: `git apply` over GNU `patch`:** Eliminates external Windows dependency on `patch.exe` and natively handles Git diff extensions.
 * **ADR-3: Post-Patch EOL Normalization:** Reconciles mixed newline styles dynamically without mutating uncommitted files before patching.
 * **ADR-4: `--snapshot` Full Tree Alignment:** Provides an escape hatch when branches diverge or Git base revision is unknown.
-* **ADR-5: Zero External Dependencies:** Preserves lightweight portable design runnable anywhere with Python 3.11+.
+* **ADR-5: Zero External Dependencies:** Preserves lightweight portable design runnable anywhere with Python 3.8+.
+* **ADR-6: Commit Message Delivery via Temporary File (`-F`):** Passes commit logs to `svn commit` via a temporary UTF-8 file instead of `-m "..."` to bypass Windows `cmd.exe` command-line length limits (8,191 chars) and quoting breakage.
+* **ADR-7: Explicit Subprocess UTF-8 Encoding:** Standardizes `encoding="utf-8", errors="replace"` across all `subprocess.run` calls, preventing Windows ANSI/OEM (`cp1252`) encoding crashes on non-ASCII commit logs or diffs.
+* **ADR-8: Windows Subversion Executable Auto-Discovery:** Resolves `svn.exe` from `PATH` or standard installation locations (`C:\Program Files\TortoiseSVN\bin\svn.exe`, `SlikSvn`) on Windows.
