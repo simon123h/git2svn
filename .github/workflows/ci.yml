@@ -74,7 +74,7 @@ jobs:
           coverage xml
 
       - name: Run Unit & Integration Tests
-        if: !(runner.os == 'Linux' && matrix.python-version == '3.12')
+        if: runner.os != 'Linux' || matrix.python-version != '3.12'
         run: python -m unittest discover tests
 
       - name: Upload Coverage to Codecov
