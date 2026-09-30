@@ -143,6 +143,8 @@ class GitRepo:
             check=check,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
     def run_cmd_bytes(self, args: List[str], check: bool = True) -> subprocess.CompletedProcess[bytes]:

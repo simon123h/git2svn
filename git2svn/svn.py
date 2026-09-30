@@ -2,21 +2,42 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .git import FileChange
 
 logger = logging.getLogger("git2svn")
 
 
+def find_svn_binary() -> str:
+    """Find svn executable, checking TortoiseSVN / SlikSVN default paths if on Windows."""
+    found = shutil.which("svn")
+    if found:
+        return found
+    if sys.platform == "win32":
+        candidates = [
+            Path("C:/Program Files/TortoiseSVN/bin/svn.exe"),
+            Path("C:/Program Files (x86)/TortoiseSVN/bin/svn.exe"),
+            Path("C:/Program Files/SlikSvn/bin/svn.exe"),
+            Path("C:/Program Files (x86)/SlikSvn/bin/svn.exe"),
+        ]
+        for c in candidates:
+            if c.is_file():
+                return str(c)
+    return "svn"
+
+
 class SvnWorkspace:
     """Wrapper around SVN commands and filesystem staging operations."""
 
-    def __init__(self, workspace_dir: Path, svn_bin: str = "svn", dry_run: bool = False):
+    def __init__(self, workspace_dir: Path, svn_bin: Optional[str] = None, dry_run: bool = False):
         self.workspace_dir = workspace_dir.resolve()
-        self.svn_bin = svn_bin
+        self.svn_bin = svn_bin or find_svn_binary()
         self.dry_run = dry_run
 
     def run_cmd(self, args: List[str], check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -32,6 +53,8 @@ class SvnWorkspace:
             check=check,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
     def is_valid_workspace(self) -> bool:
@@ -138,20 +161,27 @@ class SvnWorkspace:
                 )
 
     def commit(self, message: str) -> None:
-        """Run svn commit -m <message>."""
+        """Run svn commit using a temporary file with -F to support arbitrary message lengths and encodings."""
         if self.dry_run:
-            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} commit -m {message!r}")
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} commit -F <msg_file>")
             return
 
         logger.info("Executing svn commit in %s...", self.workspace_dir)
-        res = self.run_cmd(["commit", "-m", message], check=False)
-        if res.returncode != 0:
-            logger.error("Failed to 'svn commit': %s", res.stderr.strip())
-            raise subprocess.CalledProcessError(
-                res.returncode, [self.svn_bin, "commit", "-m", message], res.stdout, res.stderr
-            )
-        if res.stdout:
-            logger.info("SVN commit output:\n%s", res.stdout.strip())
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tf:
+            tf.write(message)
+            tf_path = Path(tf.name)
+
+        try:
+            res = self.run_cmd(["commit", "-F", str(tf_path)], check=False)
+            if res.returncode != 0:
+                logger.error("Failed to 'svn commit': %s", res.stderr.strip())
+                raise subprocess.CalledProcessError(
+                    res.returncode, [self.svn_bin, "commit", "-F", str(tf_path)], res.stdout, res.stderr
+                )
+            if res.stdout:
+                logger.info("SVN commit output:\n%s", res.stdout.strip())
+        finally:
+            tf_path.unlink(missing_ok=True)
 
     def apply_structural_changes(self, changes: List[FileChange]) -> None:
         """

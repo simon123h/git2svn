@@ -34,6 +34,8 @@ class Patcher:
             input=diff_content,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
         if proc.returncode != 0:

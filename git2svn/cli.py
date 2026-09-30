@@ -27,6 +27,8 @@ def find_default_git_dir() -> Path:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if res.returncode == 0 and res.stdout.strip():
             return Path(res.stdout.strip())

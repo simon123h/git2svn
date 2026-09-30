@@ -144,14 +144,20 @@ class TestSvnWorkspace(unittest.TestCase):
     @patch("subprocess.run")
     def test_commit(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="Committed revision 42.\n", stderr="")
-        self.svn.commit("feat: some feature\n\nDetailed body.")
-        mock_run.assert_called_once_with(
-            ["svn", "commit", "-m", "feat: some feature\n\nDetailed body."],
-            cwd=self.workspace_dir,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        msg = "feat: some feature\n\nDetailed body."
+        self.svn.commit(msg)
+        self.assertEqual(mock_run.call_count, 1)
+        args, kwargs = mock_run.call_args
+        self.assertEqual(args[0][:3], ["svn", "commit", "-F"])
+        msg_file = Path(args[0][3])
+        self.assertEqual(kwargs["cwd"], self.workspace_dir)
+        self.assertFalse(kwargs["check"])
+        self.assertTrue(kwargs["capture_output"])
+        self.assertTrue(kwargs["text"])
+        self.assertEqual(kwargs["encoding"], "utf-8")
+        self.assertEqual(kwargs["errors"], "replace")
+        # Ensure temp file was cleaned up after commit
+        self.assertFalse(msg_file.exists())
 
     @patch("subprocess.run")
     def test_stage_add(self, mock_run):
@@ -168,6 +174,8 @@ class TestSvnWorkspace(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
     @patch("subprocess.run")
@@ -183,6 +191,8 @@ class TestSvnWorkspace(unittest.TestCase):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
 
@@ -351,7 +361,8 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual((self.svn_path / "single.txt").read_text(), "single content\n")
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
         self.assertIn(["add", "single.txt", "--parents"], called_args)
-        self.assertIn(["commit", "-m", "feat: single commit"], called_args)
+        commit_calls = [arg for arg in called_args if len(arg) >= 2 and arg[0] == "commit" and arg[1] == "-F"]
+        self.assertEqual(len(commit_calls), 1)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_replay_range(self, mock_svn_cmd):
@@ -385,8 +396,8 @@ class TestSynchronizer(unittest.TestCase):
 
         self.assertEqual((self.svn_path / "file.txt").read_text(), "v2\n")
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["commit", "-m", "commit 1"], called_args)
-        self.assertIn(["commit", "-m", "commit 2"], called_args)
+        commit_calls = [arg for arg in called_args if len(arg) >= 2 and arg[0] == "commit" and arg[1] == "-F"]
+        self.assertEqual(len(commit_calls), 2)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_replay_conflict_pause_and_continue(self, mock_svn_cmd):
