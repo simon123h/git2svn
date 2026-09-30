@@ -18,6 +18,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
+    "coverage>=7.0.0",
     "ruff>=0.8.0",
 ]
 
@@ -44,3 +45,18 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.coverage.run]
+source = ["git2svn"]
+branch = true
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
