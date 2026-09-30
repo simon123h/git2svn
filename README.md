@@ -89,9 +89,14 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 
 Extracts the diff of a specific commit (`<commit>^..<commit>`) and applies it to the SVN workspace using `patch -p1`, followed by structural staging.
 
+* `--commit`, `-c`: Automatically commit staged changes to SVN using the exact Git commit message.
+
 ```bash
-# Example: Port a single bugfix commit
+# Example: Port a single bugfix commit (staged only, manual review)
 ./git2svn.py cherry-pick a1b2c3d4 --svn-dir /home/simon/svn/repo/trunk
+
+# Example: Port and commit directly with the Git commit message
+./git2svn.py cherry-pick a1b2c3d4 -c --svn-dir /home/simon/svn/repo/trunk
 ```
 
 ---

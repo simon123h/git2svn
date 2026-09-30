@@ -185,6 +185,11 @@ class GitRepo:
         res = self.run_cmd(["diff", "-z", "--name-status", empty_tree_hash, commit_hash])
         return parse_name_status_z(res.stdout)
 
+    def get_commit_message(self, commit_hash: str) -> str:
+        """Get the full commit message for the given commit hash."""
+        res = self.run_cmd(["log", "-1", "--format=%B", commit_hash])
+        return res.stdout.strip()
+
 
 class SvnWorkspace:
     """Wrapper around SVN commands and filesystem staging operations."""
@@ -246,6 +251,22 @@ class SvnWorkspace:
             else:
                 logger.error("Failed to 'svn rm %s': %s", rel_path, res.stderr.strip())
                 raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "rm", str(rel_path)], res.stdout, res.stderr)
+
+    def commit(self, message: str) -> None:
+        """Run svn commit -m <message>."""
+        if self.dry_run:
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} commit -m {message!r}")
+            return
+
+        logger.info("Executing svn commit in %s...", self.workspace_dir)
+        res = self.run_cmd(["commit", "-m", message], check=False)
+        if res.returncode != 0:
+            logger.error("Failed to 'svn commit': %s", res.stderr.strip())
+            raise subprocess.CalledProcessError(
+                res.returncode, [self.svn_bin, "commit", "-m", message], res.stdout, res.stderr
+            )
+        if res.stdout:
+            logger.info("SVN commit output:\n%s", res.stdout.strip())
 
     def apply_structural_changes(self, changes: List[FileChange]) -> None:
         """
@@ -333,12 +354,13 @@ class Synchronizer:
         self.patcher = patcher
         self.dry_run = dry_run
 
-    def cherry_pick(self, commit_hash: str) -> None:
+    def cherry_pick(self, commit_hash: str, commit_svn: bool = False) -> None:
         """
         Port a single Git commit to SVN workspace:
         1. Extract diff of specified commit (<commit>^..<commit>).
         2. Apply diff to SVN workspace using patch -p1.
         3. Parse git diff --name-status and apply SVN structural commands.
+        4. Optionally commit to SVN using the exact Git commit message.
         """
         logger.info("Running cherry-pick for commit %s", commit_hash)
         parent = self.git.get_commit_parent(commit_hash)
@@ -358,6 +380,12 @@ class Synchronizer:
 
         logger.info("Staging SVN structural changes...")
         self.svn.apply_structural_changes(changes)
+
+        if commit_svn:
+            commit_msg = self.git.get_commit_message(commit_hash)
+            logger.info("Committing to SVN with Git commit message:\n%s", commit_msg)
+            self.svn.commit(commit_msg)
+
         logger.info("Cherry-pick completed successfully.")
 
     def squash(self, start_ref: str, end_ref: str) -> None:
@@ -522,6 +550,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Port a single Git commit to SVN using patch -p1",
     )
     parser_cp.add_argument("commit_hash", help="Git commit hash to port")
+    parser_cp.add_argument(
+        "--commit",
+        "-c",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Commit staged changes to SVN using the exact Git commit message",
+    )
 
     # squash
     parser_sq = subparsers.add_parser(
@@ -546,7 +581,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = build_parser()
-    namespace = argparse.Namespace(git_dir=None, svn_dir=None, dry_run=False, verbose=False)
+    namespace = argparse.Namespace(git_dir=None, svn_dir=None, dry_run=False, verbose=False, commit=False)
     return parser.parse_args(argv, namespace=namespace)
 
 
@@ -578,7 +613,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         if args.command == "cherry-pick":
-            sync_mgr.cherry_pick(args.commit_hash)
+            sync_mgr.cherry_pick(args.commit_hash, commit_svn=getattr(args, "commit", False))
         elif args.command == "squash":
             sync_mgr.squash(args.start_ref, args.end_ref)
         elif args.command == "sync":

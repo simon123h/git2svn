@@ -69,6 +69,14 @@ class TestCliArgs(unittest.TestCase):
         self.assertEqual(args.command, "cherry-pick")
         self.assertEqual(args.commit_hash, "abc1234")
         self.assertEqual(args.svn_dir, Path("/path/to/svn"))
+        self.assertFalse(args.commit)
+
+    def test_cherry_pick_commit_flag(self):
+        args = git2svn.parse_cli_args(["cherry-pick", "abc1234", "--svn-dir", "/path/to/svn", "--commit"])
+        self.assertTrue(args.commit)
+
+        args_short = git2svn.parse_cli_args(["cherry-pick", "abc1234", "-s", "/path/to/svn", "-c"])
+        self.assertTrue(args_short.commit)
 
     def test_squash_args(self):
         args = git2svn.parse_cli_args(["--svn-dir", "/path/to/svn", "squash", "main", "feature"])
@@ -96,6 +104,18 @@ class TestSvnWorkspace(unittest.TestCase):
 
     def tearDown(self):
         self.temp_dir.cleanup()
+
+    @patch("subprocess.run")
+    def test_commit(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="Committed revision 42.\n", stderr="")
+        self.svn.commit("feat: some feature\n\nDetailed body.")
+        mock_run.assert_called_once_with(
+            ["svn", "commit", "-m", "feat: some feature\n\nDetailed body."],
+            cwd=self.workspace_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
     @patch("subprocess.run")
     def test_stage_add(self, mock_run):
@@ -244,6 +264,34 @@ class TestSynchronizer(unittest.TestCase):
         # Check SVN staging commands called
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
         self.assertIn(["add", "nested/new.txt", "--parents"], called_args)
+        # Verify commit is NEVER called by default
+        self.assertFalse(any(cmd[0] == "commit" for cmd in called_args))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_cherry_pick_with_commit(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="Committed revision 100.\n", stderr="")
+
+        # Commit in Git with multi-line message
+        commit_msg = "feat(core): add feature X\n\nDetailed explanation of feature X."
+        f = self.git_path / "feature.txt"
+        f.write_text("feature content\n")
+        subprocess.run(["git", "add", "feature.txt"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=self.git_path, check=True)
+
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # Execute cherry-pick with commit_svn=True
+        self.sync_mgr.cherry_pick(commit_hash, commit_svn=True)
+
+        # Check content in SVN workspace
+        self.assertEqual((self.svn_path / "feature.txt").read_text(), "feature content\n")
+
+        # Check SVN staging and commit were called
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertIn(["add", "feature.txt", "--parents"], called_args)
+        self.assertIn(["commit", "-m", commit_msg], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_cherry_pick_root_commit(self, mock_svn_cmd):
