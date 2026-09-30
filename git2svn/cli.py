@@ -182,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = build_parser()
+    effective_argv = sys.argv[1:] if argv is None else argv
+    if not effective_argv:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+
     namespace = argparse.Namespace(
         git_dir=None,
         svn_dir=None,

@@ -826,6 +826,19 @@ class TestEolUtilities(unittest.TestCase):
             self.assertEqual(cm.exception.code, 0)
             self.assertIn(f"git2svn {git2svn.get_version()}", fake_out.getvalue())
 
+    def test_bare_invocation_prints_help(self):
+        """Verify calling git2svn with no arguments prints full help to stderr and exits with code 1."""
+        import io
+        from unittest.mock import patch
+
+        with patch("sys.stderr", new=io.StringIO()) as fake_err, self.assertRaises(SystemExit) as cm:
+            git2svn.main([])
+        self.assertEqual(cm.exception.code, 1)
+        output = fake_err.getvalue()
+        self.assertIn("Core Actions:", output)
+        self.assertIn("stage", output)
+        self.assertIn("replay", output)
+
 
 if __name__ == "__main__":
     unittest.main()
