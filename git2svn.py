@@ -248,6 +248,21 @@ class GitRepo:
         except Exception:
             return False
 
+    def get_current_branch(self) -> str:
+        """Return the current branch name or 'HEAD (detached)'."""
+        res = self.run_cmd(["rev-parse", "--abbrev-ref", "HEAD"], check=False)
+        if res.returncode == 0:
+            branch = res.stdout.strip()
+            return branch if branch != "HEAD" else "HEAD (detached)"
+        return "unknown"
+
+    def get_head_commit(self) -> str:
+        """Return the short hash of HEAD."""
+        res = self.run_cmd(["rev-parse", "--short", "HEAD"], check=False)
+        if res.returncode == 0:
+            return res.stdout.strip()
+        return "unknown"
+
     def get_commit_parent(self, commit_hash: str) -> Optional[str]:
         """Return the parent commit hash, or None if root commit."""
         res = self.run_cmd(["rev-parse", "--verify", f"{commit_hash}^"], check=False)
@@ -327,6 +342,17 @@ class SvnWorkspace:
             return res.returncode == 0
         except Exception:
             return False
+
+    def get_info(self) -> Dict[str, str]:
+        """Return key-value mapping of 'svn info' output."""
+        info: Dict[str, str] = {}
+        res = self.run_cmd(["info"], check=False)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    info[k.strip()] = v.strip()
+        return info
 
     def is_clean(self) -> bool:
         """Check if SVN workspace has no uncommitted changes."""
@@ -487,12 +513,31 @@ class Synchronizer:
         self.patcher = patcher
         self.dry_run = dry_run
 
+    def show_identity_banner(self, target_ref_spec: str) -> None:
+        """Display identity banner showing active Git and SVN target branches/URLs."""
+        branch = self.git.get_current_branch()
+        head = self.git.get_head_commit()
+        svn_info = self.svn.get_info()
+
+        svn_target = svn_info.get("Relative URL") or svn_info.get("URL") or str(self.svn.workspace_dir.name)
+        svn_rev = svn_info.get("Revision")
+        svn_suffix = f" (r{svn_rev})" if svn_rev else ""
+
+        banner = (
+            f"[TARGET] Git source : {self.git.repo_dir.name} [{branch} @ {head}] -> ref: {target_ref_spec}\n"
+            f"[TARGET] SVN target : {self.svn.workspace_dir.name} [{svn_target}{svn_suffix}]"
+        )
+        print(banner)
+
     def stage(self, ref1: str, ref2: Optional[str] = None, use_copy: bool = False) -> None:
         """
         Stage changes from a commit or range in SVN workspace without committing.
         If use_copy=True, brute-force copies files using shutil (bypassing patch).
         """
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
+        target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
+        self.show_identity_banner(target_spec)
+
         if is_single:
             commit_hash = start_or_commit
             logger.info("Staging single commit %s (copy_mode=%s)", commit_hash, use_copy)
@@ -517,6 +562,9 @@ class Synchronizer:
         Replay a single commit or range of commits onto SVN, committing each with its Git message.
         """
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
+        target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
+        self.show_identity_banner(target_spec)
+
         if is_single:
             commit_hash = start_or_commit
             logger.info("Replaying single commit %s", commit_hash)

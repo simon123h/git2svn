@@ -447,6 +447,18 @@ class TestSynchronizer(unittest.TestCase):
         self.assertIn(["revert", "-R", "."], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_identity_banner(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess(
+            [], 0, stdout="URL: https://svn.example.com/repo/branches/feature\nRelative URL: ^/branches/feature\nRevision: 1042\n", stderr=""
+        )
+        with patch("builtins.print") as mock_print:
+            self.sync_mgr.show_identity_banner("master..feature")
+            printed_banner = mock_print.call_args[0][0]
+            self.assertIn("[TARGET] Git source :", printed_banner)
+            self.assertIn("ref: master..feature", printed_banner)
+            self.assertIn("^/branches/feature (r1042)", printed_banner)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_main_cli(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
