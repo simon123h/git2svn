@@ -70,7 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="git2svn",
-        description="Consolidated utility to synchronize Git revisions to an SVN workspace.",
+        description=(
+            "Consolidated utility to synchronize Git revisions to an SVN workspace.\n\n"
+            "Core Actions:\n"
+            "  stage   NEVER commits. Applies Git changes to the SVN working copy (svn add/rm)\n"
+            "          leaving files uncommitted for inspection, manual review, or squashing.\n"
+            "  replay  ALWAYS commits. Sequentially ports individual Git commits into SVN history,\n"
+            "          preserving original author messages, commit order, and providing stateful\n"
+            "          conflict pause/continue lifecycle management."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[common_parser],
     )
 
@@ -85,7 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser_stage = subparsers.add_parser(
         "stage",
         parents=[common_parser],
-        help="Stage changes in SVN workspace without committing (for review)",
+        help="Stage changes in SVN workspace without committing (for review or squash)",
+        description=(
+            "Stage changes from a Git commit or range in the SVN workspace without committing.\n"
+            "Leaves the SVN working copy dirty (uncommitted) so you can inspect diffs,\n"
+            "review changes in TortoiseSVN/CLI, or commit manually."
+        ),
     )
     parser_stage.add_argument(
         "ref1", help="Commit hash, branch, or start ref (e.g. 'abc1234' or 'main..feature' or 'main')"
@@ -109,6 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
         "replay",
         parents=[common_parser],
         help="Replay commit(s) sequentially onto SVN, committing each with its Git message",
+        description=(
+            "Replay one or more Git commits sequentially into SVN history.\n"
+            "Each commit is applied and committed with its original Git message and metadata.\n"
+            "If a patch conflict occurs, replay pauses and persists state for interactive\n"
+            "resolution via --continue, --abort, or --skip."
+        ),
     )
     parser_replay.add_argument("ref1", nargs="?", default=None, help="Commit hash or start ref")
     parser_replay.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
