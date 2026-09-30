@@ -21,6 +21,17 @@ from .svn import SvnWorkspace
 
 __version__ = "0.1.0"
 
+
+def get_version() -> str:
+    """Return package version from installed distribution metadata or fallback to __version__."""
+    try:
+        from importlib.metadata import version
+
+        return version("git2svn")
+    except Exception:
+        return __version__
+
+
 __all__ = [
     "Synchronizer",
     "GitRepo",
@@ -40,4 +51,6 @@ __all__ = [
     "build_parser",
     "parse_cli_args",
     "main",
+    "get_version",
+    "__version__",
 ]

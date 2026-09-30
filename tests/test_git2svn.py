@@ -815,6 +815,17 @@ class TestEolUtilities(unittest.TestCase):
         git2svn.normalize_file_eol(f, target_eol=b"\n")
         self.assertEqual(f.read_bytes(), b"line 1\nline 2\nline 3\n")
 
+    def test_version_cli(self):
+        """Verify -V and --version flags output program version and exit with code 0."""
+        import io
+        from unittest.mock import patch
+
+        for flag in ["-V", "--version"]:
+            with patch("sys.stdout", new=io.StringIO()) as fake_out, self.assertRaises(SystemExit) as cm:
+                git2svn.main([flag])
+            self.assertEqual(cm.exception.code, 0)
+            self.assertIn(f"git2svn {git2svn.get_version()}", fake_out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

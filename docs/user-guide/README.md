@@ -14,6 +14,7 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 
 | Option | Flag | Environment Variable | Git Config Key (`.git/config`) | Default | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
+| `--version` | `-V` | — | — | — | Show program's version number and exit. |
 | `--svn-dir` | `-s` | `SVN_DIR` | `git2svn.svnDir` | None (required) | Path to the local Subversion working copy (`.svn` root). |
 | `--git-dir` | `-g` | — | — | Current Git root | Path to the local Git repository root. |
 | `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |

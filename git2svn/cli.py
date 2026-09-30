@@ -82,6 +82,15 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[common_parser],
     )
+    from . import get_version
+
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {get_version()}",
+        help="Show program's version number and exit",
+    )
 
     subparsers = parser.add_subparsers(
         dest="command",
