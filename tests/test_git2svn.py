@@ -148,7 +148,7 @@ class TestSvnWorkspace(unittest.TestCase):
         self.svn.commit(msg)
         self.assertEqual(mock_run.call_count, 1)
         args, kwargs = mock_run.call_args
-        self.assertEqual(args[0][:3], ["svn", "commit", "-F"])
+        self.assertEqual(args[0][:3], [self.svn.svn_bin, "commit", "-F"])
         msg_file = Path(args[0][3])
         self.assertEqual(kwargs["cwd"], self.workspace_dir)
         self.assertFalse(kwargs["check"])
@@ -169,7 +169,7 @@ class TestSvnWorkspace(unittest.TestCase):
         # Ensure parent directory was created on disk
         self.assertTrue((self.workspace_dir / "nested" / "folder").is_dir())
         mock_run.assert_called_once_with(
-            ["svn", "add", "nested/folder/file.txt", "--parents"],
+            [self.svn.svn_bin, "add", "nested/folder/file.txt", "--parents"],
             cwd=self.workspace_dir,
             check=False,
             capture_output=True,
@@ -186,7 +186,7 @@ class TestSvnWorkspace(unittest.TestCase):
         self.svn.stage_rm(rel_path)
 
         mock_run.assert_called_once_with(
-            ["svn", "rm", "file_to_remove.txt"],
+            [self.svn.svn_bin, "rm", "file_to_remove.txt"],
             cwd=self.workspace_dir,
             check=False,
             capture_output=True,

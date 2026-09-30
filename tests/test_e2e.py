@@ -87,7 +87,7 @@ class TestGit2SvnE2E(unittest.TestCase):
 
     def _svn_log_messages(self) -> list[str]:
         res = subprocess.run(
-            [SVN_BIN, "log", "-q"],
+            [SVN_BIN, "log", "-r", "1:HEAD", "-q"],
             cwd=self.svn_wc_dir,
             check=True,
             capture_output=True,
@@ -96,7 +96,7 @@ class TestGit2SvnE2E(unittest.TestCase):
         )
         # Detailed log with messages
         res_full = subprocess.run(
-            [SVN_BIN, "log"],
+            [SVN_BIN, "log", "-r", "1:HEAD"],
             cwd=self.svn_wc_dir,
             check=True,
             capture_output=True,
