@@ -1,6 +1,7 @@
-# Command Reference: `stage` & `replay`
+# Command Reference: `setup`, `stage` & `replay`
 
-This document details the usage, flags, and mechanics for `git2svn stage` and `git2svn replay`.
+This document details the usage, flags, and mechanics for `git2svn setup`, `git2svn stage`, and `git2svn replay`.
+
 
 ---
 
@@ -63,17 +64,19 @@ Replay each commit in the range sequentially into SVN history:
 git2svn replay main..feature/login -s /path/to/svn
 ```
 
-### 2.3 Updating Working Copy Base Revision (`--update` / `-u`)
-Subversion working copies operate with **mixed revisions**: when `git2svn replay` commits revisions to the SVN repository, only touched files are updated locally while the working copy base revision remains pegged at the previous revision (meaning `svn log` won't show new commits without `svn update`).
+### 2.3 Automatic Working Copy Base Revision Update (`--no-update`)
+Subversion working copies operate with **mixed revisions**: when `git2svn replay` commits revisions to the SVN repository, only touched files are updated locally while the working copy base revision remains pegged at the previous revision.
 
-Use `-u` or `--update` to automatically run `svn update` upon successful replay completion:
+To keep your working copy aligned at `HEAD` and ready for subsequent mirror synchronizations, **`git2svn replay` automatically runs `svn update` upon completion by default**.
+
+If you need to skip the automatic update (e.g. over high-latency connections), pass `--no-update`:
 ```bash
-git2svn replay -u main..feature/login -s /path/to/svn
+git2svn replay --no-update main..feature/login -s /path/to/svn
 ```
 
-You can also enable this permanently for your repository in `.git/config`:
+You can also disable automatic updates persistently for a repository via `.git/config`:
 ```bash
-git config git2svn.autoUpdate true
+git config git2svn.autoUpdate false
 ```
 
 ---
@@ -131,7 +134,29 @@ flowchart TD
 
 ---
 
-## 4. Structural Staging Mechanics
+## 4. Command: `setup`
+
+Automates initial repository configuration for a fresh clone or existing repository.
+
+```bash
+git2svn setup /path/to/svn
+```
+
+### What `setup` does:
+1. **Validates SVN Working Copy:** Verifies that `/path/to/svn` contains a `.svn` directory.
+2. **Auto-Detects Local Trunk Branch:** Inspects local branches with preference for `trunk`, falling back to `main`, `master`, or the current branch.
+3. **Auto-Detects Remote Mirror Tracking Branch:** Scans remote branches for `svn-mirror/trunk`, `origin/trunk`, or branches matching the detected trunk name.
+4. **Writes Git Configuration:**
+   - `git config git2svn.svnDir <path/to/svn>`
+   - `git config git2svn.defaultRange "<remote_branch>..<trunk_branch>"`
+   - `git config pull.ff only` (prevents accidental merge commits when pulling)
+5. **Configures Productivity Aliases:**
+   - `git config alias.svn-push`: Replays trunk to SVN, triggers mirror sync, fetches SVN mirror, and fast-forwards trunk.
+   - `git config alias.svn-pull`: Triggers mirror sync, fetches SVN mirror, and fast-forwards trunk.
+
+---
+
+## 5. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 

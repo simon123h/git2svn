@@ -264,3 +264,23 @@ class GitRepo:
             val = res.stdout.strip().lower()
             return val in ("true", "yes", "on", "1")
         return None
+
+    def set_config(self, key: str, value: str) -> None:
+        """Set a repository-level configuration value via git config <key> <value>."""
+        self.run_cmd(["config", key, value], check=True)
+
+    def get_local_branches(self) -> List[str]:
+        """Return list of local branch names."""
+        res = self.run_cmd(["for-each-ref", "--format=%(refname:short)", "refs/heads/"], check=False)
+        if res.returncode == 0:
+            return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        return []
+
+    def get_remote_branches(self) -> List[str]:
+        """Return list of remote branch names (e.g. 'origin/trunk', 'svn-mirror/trunk')."""
+        res = self.run_cmd(["for-each-ref", "--format=%(refname:short)", "refs/remotes/"], check=False)
+        if res.returncode == 0:
+            return [
+                line.strip() for line in res.stdout.splitlines() if line.strip() and not line.strip().endswith("/HEAD")
+            ]
+        return []

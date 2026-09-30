@@ -61,9 +61,9 @@ Because `git2svn replay` enforces a strictly linear history, **never create merg
 ### 2.4 Replay Commits to SVN
 Replay the uncommitted range from the mirror base to `trunk`:
 ```bash
-git2svn replay -u svn-mirror/trunk..trunk
+git2svn replay svn-mirror/trunk..trunk
 ```
-*(The `-u` flag automatically runs `svn update` upon completion, ensuring your SVN working copy base revision is bumped to `HEAD`.)*
+*(By default, `replay` automatically executes `svn update` upon completion, ensuring your SVN working copy base revision is bumped to `HEAD`.)*
 
 > [!TIP]
 > If you configure `git config git2svn.defaultRange "svn-mirror/trunk..trunk"`, you can simply run:

@@ -539,14 +539,14 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual((self.svn_path / "cfg_test.txt").read_text(), "config test\n")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_replay_with_update_flag(self, mock_svn_cmd):
-        """Verify git2svn replay --update invokes svn update on completion."""
+    def test_replay_invokes_svn_update_by_default(self, mock_svn_cmd):
+        """Verify git2svn replay invokes svn update by default without any flag or config."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        f = self.git_path / "update_test.txt"
-        f.write_text("update test\n")
+        f = self.git_path / "default_update_test.txt"
+        f.write_text("default update test\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "update test"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "default update test"], cwd=self.git_path, check=True)
         commit_hash = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
         ).stdout.strip()
@@ -558,7 +558,6 @@ class TestSynchronizer(unittest.TestCase):
                 "--svn-dir",
                 str(self.svn_path),
                 "replay",
-                "-u",
                 commit_hash,
             ]
         )
@@ -567,16 +566,44 @@ class TestSynchronizer(unittest.TestCase):
         self.assertIn(["update"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_replay_with_git_config_auto_update(self, mock_svn_cmd):
-        """Verify git config git2svn.autoUpdate invokes svn update on replay without CLI -u."""
+    def test_replay_with_no_update_flag(self, mock_svn_cmd):
+        """Verify git2svn replay --no-update disables svn update."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        subprocess.run(["git", "config", "git2svn.autoUpdate", "true"], cwd=self.git_path, check=True)
-
-        f = self.git_path / "auto_update_test.txt"
-        f.write_text("auto update test\n")
+        f = self.git_path / "no_update_test.txt"
+        f.write_text("no update test\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "auto update test"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "no update test"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "--svn-dir",
+                str(self.svn_path),
+                "replay",
+                "--no-update",
+                commit_hash,
+            ]
+        )
+        self.assertEqual(code, 0)
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertNotIn(["update"], called_args)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_with_git_config_auto_update_disabled(self, mock_svn_cmd):
+        """Verify git config git2svn.autoUpdate false disables svn update on replay."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        subprocess.run(["git", "config", "git2svn.autoUpdate", "false"], cwd=self.git_path, check=True)
+
+        f = self.git_path / "config_disabled_update.txt"
+        f.write_text("config disabled\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "config disabled"], cwd=self.git_path, check=True)
         commit_hash = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
         ).stdout.strip()
@@ -593,7 +620,7 @@ class TestSynchronizer(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["update"], called_args)
+        self.assertNotIn(["update"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_replay_with_git_config_default_range(self, mock_svn_cmd):
@@ -838,6 +865,40 @@ class TestEolUtilities(unittest.TestCase):
         self.assertIn("Core Actions:", output)
         self.assertIn("stage", output)
         self.assertIn("replay", output)
+
+    def test_setup_command(self):
+        """Verify git2svn setup command configures git settings and aliases properly."""
+        svn_dir = self.path / "fake_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        git_dir = self.path / "fake_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "trunk"], cwd=git_dir, check=True, capture_output=True)
+        # Create an initial commit
+        (git_dir / "README.md").write_text("hello")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        # Create a fake svn-mirror remote branch
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/svn-mirror/trunk", "HEAD"],
+            cwd=git_dir,
+            check=True,
+        )
+
+        res = git2svn.main(["--git-dir", str(git_dir), "setup", str(svn_dir)])
+        self.assertEqual(res, 0)
+
+        git_repo = git2svn.GitRepo(git_dir)
+        self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(svn_dir).replace("\\", "/"))
+        self.assertEqual(git_repo.get_config("git2svn.defaultRange"), "svn-mirror/trunk..trunk")
+        self.assertIsNone(git_repo.get_config("git2svn.autoUpdate"))
+        self.assertEqual(git_repo.get_config("pull.ff"), "only")
+        self.assertIn("git2svn replay", git_repo.get_config("alias.svn-push"))
+        self.assertIn("git fetch svn-mirror", git_repo.get_config("alias.svn-pull"))
 
 
 if __name__ == "__main__":

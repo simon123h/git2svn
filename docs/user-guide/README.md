@@ -20,7 +20,7 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 | `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
 | `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
 | `--copy` | — | — | `git2svn.copy` | `False` | Extract exact binary snapshots directly from Git object DB. |
-| `--update` | `-u` | — | `git2svn.autoUpdate` | `False` | Run `svn update` after `replay` to bump local base revision to `HEAD`. |
+| `--no-update` | `-u / --update` | — | `git2svn.autoUpdate` | `True` | Run `svn update` after `replay` to bump local base revision to `HEAD` (enabled by default). |
 | `<ref1> [ref2]` | — | — | `git2svn.defaultRange` | None | Default revision or range (e.g. `svn-mirror/trunk..trunk`) when omitted from CLI. |
 
 ### 1.1 Persisting Settings via `git config`
@@ -34,12 +34,12 @@ git config git2svn.svnDir "C:/Projects/my-svn-checkout"
 # Configure default integration range:
 git config git2svn.defaultRange "svn-mirror/trunk..trunk"
 
-# Automatically update SVN working copy after replay:
-git config git2svn.autoUpdate true
+# Optional: Disable automatic 'svn update' if desired (defaults to true):
+git config git2svn.autoUpdate false
 ```
 
 #### Precedence Hierarchy:
-1. Explicit CLI arguments (`--svn-dir`, `--dry-run`, `--copy`, `-u`)
+1. Explicit CLI arguments (`--svn-dir`, `--dry-run`, `--copy`, `--no-update` / `-u`)
 2. Environment variables (`SVN_DIR`)
 3. Repository or global Git configuration (`git config git2svn.*`)
 4. System defaults
@@ -48,8 +48,9 @@ git config git2svn.autoUpdate true
 
 ## 2. Core Actions
 
-`git2svn` centers around two distinct verbs with strict commit boundaries:
+`git2svn` centers around distinct actions with strict commit boundaries:
 
+- **[`setup`](commands.md#4-command-setup):** **Repository bootstrap.** Automates initial repository configuration, branch tracking detection, and productivity aliases (`git svn-push`, `git svn-pull`).
 - **[`stage`](commands.md#1-command-stage):** **Never commits.** Prepares changes in the SVN workspace (`svn add`, `svn rm`), leaving the working copy dirty for visual review in TortoiseSVN or manual commit.
 - **[`replay`](commands.md#2-command-replay):** **Always commits.** Sequentially ports Git commits into SVN history, preserving author commit messages and providing stateful conflict recovery.
 
@@ -57,6 +58,7 @@ git config git2svn.autoUpdate true
 
 ## 3. Guide Contents
 
-- **[Command Reference](commands.md):** Detailed guide for `stage` (single, range, `--copy`, `--snapshot`), `replay` (`--continue`, `--abort`, `--skip`, `--update`), and structural staging mechanics.
+- **[Command Reference](commands.md):** Detailed guide for `setup`, `stage` (single, range, `--copy`, `--snapshot`), `replay` (`--continue`, `--abort`, `--skip`, `--update`), and structural staging mechanics.
 - **[Integration Branch Workflow](integration-workflow.md):** Recommended 3-branch model (`svn-mirror/trunk` + `trunk` + topic branches) and productivity aliases for seamless bidirectional SVN-to-Git synchronization.
 - **[Troubleshooting & FAQ](troubleshooting.md):** Solutions for patch rejections (`.rej`), mixed revisions, merge commit restrictions, and Windows `svn.exe` path discovery.
+
