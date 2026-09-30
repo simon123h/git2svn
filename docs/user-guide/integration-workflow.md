@@ -86,3 +86,46 @@ git reset --hard svn-mirror/trunk
 # Safely delete the merged feature branch
 git branch -d feature/login-page
 ```
+
+---
+
+## 3. Productivity Tip: Git Aliases (e.g. `git svn-push`)
+
+To make daily operation feel identical to a standard Git workflow, configure custom Git aliases in your repository's `.git/config` (or globally in `~/.gitconfig`):
+
+```bash
+# 1. git svn-push: Replays trunk to SVN, triggers mirror sync, and fast-forwards trunk
+git config alias.svn-push "!f() { \
+    git2svn replay && \
+    run-svn2git-sync && \
+    git fetch svn-mirror && \
+    git checkout trunk && \
+    git reset --hard svn-mirror/trunk; \
+}; f"
+
+# 2. git svn-pull: Updates SVN mirror, fetches into Git, and fast-forwards trunk (assuming there is a `run-svn2git-sync` command)
+git config alias.svn-pull "!f() { \
+    run-svn2git-sync && \
+    git fetch svn-mirror && \
+    git checkout trunk && \
+    git reset --hard svn-mirror/trunk; \
+}; f"
+```
+
+*(Note: Replace `run-svn2git-sync` with your actual mirror synchronization command or script).*
+
+### Daily Developer Experience:
+With these aliases configured alongside `git config git2svn.defaultRange "svn-mirror/trunk..trunk"`:
+
+```bash
+# Pull latest SVN state into local Git trunk:
+git svn-pull
+
+# Code on a feature branch, rebase, and fast-forward into trunk:
+git checkout trunk
+git merge --ff-only feature/login
+
+# Push all trunk commits to SVN and update mirror in one step:
+git svn-push
+```
+

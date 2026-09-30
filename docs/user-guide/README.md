@@ -57,5 +57,5 @@ git config git2svn.autoUpdate true
 ## 3. Guide Contents
 
 - **[Command Reference](commands.md):** Detailed guide for `stage` (single, range, `--copy`, `--snapshot`), `replay` (`--continue`, `--abort`, `--skip`, `--update`), and structural staging mechanics.
-- **[Integration Branch Workflow](integration-workflow.md):** Recommended 3-branch model (`svn-mirror/trunk` + `trunk` + topic branches) for seamless bidirectional SVN-to-Git synchronization.
+- **[Integration Branch Workflow](integration-workflow.md):** Recommended 3-branch model (`svn-mirror/trunk` + `trunk` + topic branches) and productivity aliases for seamless bidirectional SVN-to-Git synchronization.
 - **[Troubleshooting & FAQ](troubleshooting.md):** Solutions for patch rejections (`.rej`), mixed revisions, merge commit restrictions, and Windows `svn.exe` path discovery.
