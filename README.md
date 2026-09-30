@@ -39,17 +39,20 @@ flowchart LR
         CP["cherry-pick &lt;commit&gt;"]
         SQ["squash &lt;start&gt; &lt;end&gt;"]
         SY["sync &lt;base&gt; &lt;target&gt;"]
+        RP["replay &lt;start&gt; &lt;end&gt;"]
     end
 
     subgraph Operations
         P["Diff & patch -p1"]
         C["shutil.copy2 (Binary/Force)"]
         S["SVN Staging (add/rm)"]
+        CM["svn commit (Git msg)"]
     end
 
     CP --> P --> S
     SQ --> P --> S
     SY --> C --> S
+    RP --> P --> S --> CM
 ```
 
 ---
@@ -123,6 +126,37 @@ Performs a brute-force file copy using Python's `shutil` for all modified and ad
 # Example: Brute-force sync of branch changes
 ./git2svn.py sync master feature/asset-overhaul --svn-dir /home/simon/svn/repo/trunk
 ```
+
+---
+
+### 4.5 Subcommand D: `replay <start_ref> <end_ref>`
+
+Sequentially ports a series of Git commits one-by-one to the SVN workspace, creating an individual `svn commit` for each Git commit using its original commit message.
+
+```bash
+# Example: Replay a series of 5 commits onto SVN
+./git2svn.py replay master feature/login-flow --svn-dir /home/simon/svn/repo/trunk
+```
+
+#### Conflict Pause & Resume Workflow
+If a commit fails to apply cleanly (patch reject / conflict):
+1. **The replay halts immediately:** The SVN workspace remains cleanly committed up to the last successful commit. Replay state is saved in `<svn_dir>/.svn/git2svn-replay.json`.
+2. **Resolve the conflict:** Open the conflicting file in your SVN workspace, resolve the issue, stage any file additions/removals with `svn add` or `svn rm`, and delete the leftover `*.rej` / `*.orig` files.
+3. **Resume replay:**
+   ```bash
+   ./git2svn.py replay --continue
+   ```
+   *(This commits the resolved changeset using the paused Git commit's message and continues replaying the remaining queue).*
+
+#### Conflict Abort & Skip
+* **Abort:** Discards uncommitted changes from the failed commit and resets the SVN working copy:
+  ```bash
+  ./git2svn.py replay --abort
+  ```
+* **Skip:** Discards the failed commit and proceeds with the rest of the queue:
+  ```bash
+  ./git2svn.py replay --skip
+  ```
 
 ---
 

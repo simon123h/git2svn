@@ -12,15 +12,72 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("git2svn")
+
+
+def find_conflict_artifacts(workspace_dir: Path) -> List[Path]:
+    """Find all .rej and .orig files in workspace_dir (ignoring .svn)."""
+    artifacts: List[Path] = []
+    for root, dirs, files in os.walk(workspace_dir):
+        if ".svn" in dirs:
+            dirs.remove(".svn")
+        for f in files:
+            if f.endswith(".rej") or f.endswith(".orig"):
+                artifacts.append(Path(root) / f)
+    return artifacts
+
+
+def clean_conflict_artifacts(workspace_dir: Path) -> List[Path]:
+    """Remove all .rej and .orig files in workspace_dir."""
+    artifacts = find_conflict_artifacts(workspace_dir)
+    for a in artifacts:
+        try:
+            a.unlink(missing_ok=True)
+            logger.debug("Removed conflict artifact: %s", a)
+        except OSError:
+            pass
+    return artifacts
+
+
+def get_replay_state_path(workspace_dir: Path) -> Path:
+    """Get the path to the replay state file."""
+    svn_meta = workspace_dir / ".svn"
+    if svn_meta.is_dir():
+        return svn_meta / "git2svn-replay.json"
+    return workspace_dir / ".git2svn-replay.json"
+
+
+def save_replay_state(workspace_dir: Path, data: dict) -> None:
+    """Save replay state to disk."""
+    path = get_replay_state_path(workspace_dir)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def load_replay_state(workspace_dir: Path) -> Optional[dict]:
+    """Load replay state from disk if it exists."""
+    path = get_replay_state_path(workspace_dir)
+    if path.is_file():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error("Failed to parse replay state file: %s", e)
+    return None
+
+
+def clear_replay_state(workspace_dir: Path) -> None:
+    """Remove the replay state file if it exists."""
+    path = get_replay_state_path(workspace_dir)
+    if path.is_file():
+        path.unlink(missing_ok=True)
 
 
 class FileChange:
@@ -190,6 +247,17 @@ class GitRepo:
         res = self.run_cmd(["log", "-1", "--format=%B", commit_hash])
         return res.stdout.strip()
 
+    def get_commit_range(self, start_ref: str, end_ref: str) -> List[str]:
+        """Return list of commit hashes in chronological order (start_ref..end_ref)."""
+        res = self.run_cmd(["rev-list", "--reverse", "--topo-order", f"{start_ref}..{end_ref}"])
+        lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        return lines
+
+    def get_merge_commits(self, start_ref: str, end_ref: str) -> List[str]:
+        """Return list of merge commits in the range (start_ref..end_ref)."""
+        res = self.run_cmd(["rev-list", "--merges", f"{start_ref}..{end_ref}"])
+        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+
 
 class SvnWorkspace:
     """Wrapper around SVN commands and filesystem staging operations."""
@@ -226,6 +294,16 @@ class SvnWorkspace:
             return res.returncode == 0
         except Exception:
             return False
+
+    def is_clean(self) -> bool:
+        """Check if SVN workspace has no uncommitted changes."""
+        res = self.run_cmd(["status", "-q"], check=False)
+        return not bool(res.stdout.strip())
+
+    def revert_all(self) -> None:
+        """Revert all uncommitted changes in the workspace."""
+        logger.info("Reverting SVN workspace changes...")
+        self.run_cmd(["revert", "-R", "."], check=False)
 
     def stage_add(self, rel_path: Path) -> None:
         """Run svn add <filepath> --parents. Creates parent directories if needed."""
@@ -493,6 +571,151 @@ class Synchronizer:
 
         logger.info("Sync completed successfully.")
 
+    def replay(self, start_ref: str, end_ref: str) -> None:
+        """
+        Replay a series of Git commits (start_ref..end_ref) sequentially onto SVN.
+        Each commit is patched, staged, and committed using its Git commit message.
+        If a conflict occurs, state is saved so user can resume with --continue.
+        """
+        if not self.dry_run and not self.svn.is_clean():
+            raise RuntimeError(
+                "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
+            )
+
+        merges = self.git.get_merge_commits(start_ref, end_ref)
+        if merges:
+            raise RuntimeError(
+                f"Range {start_ref}..{end_ref} contains {len(merges)} merge commit(s). "
+                "Replay requires a linear history (fast-forward only). Please rebase your branch first."
+            )
+
+        commits = self.git.get_commit_range(start_ref, end_ref)
+        if not commits:
+            logger.info("No commits found in range %s..%s.", start_ref, end_ref)
+            return
+
+        logger.info("Starting replay of %d commit(s) from %s to %s...", len(commits), start_ref, end_ref)
+        self._execute_replay_queue(commits, total_commits=len(commits), start_index=1)
+
+    def replay_continue(self) -> None:
+        """Resume an interrupted replay after user resolves conflicts."""
+        state = load_replay_state(self.svn.workspace_dir)
+        if not state:
+            raise RuntimeError("No replay in progress. Nothing to continue.")
+
+        current_commit = state["current_commit"]
+        current_msg = state["current_commit_msg"]
+        remaining = state.get("remaining_commits", [])
+        total = state.get("total_commits", len(remaining) + 1)
+        completed = state.get("completed_commits", 0)
+
+        # 1. Check for leftover .rej / .orig files
+        rej_files = find_conflict_artifacts(self.svn.workspace_dir)
+        if rej_files:
+            rel_rejs = [str(r.relative_to(self.svn.workspace_dir)) for r in rej_files]
+            raise RuntimeError(
+                f"Found rejected patch artifacts ({', '.join(rel_rejs)}). "
+                "Please resolve conflicts and delete .rej / .orig files before running --continue."
+            )
+
+        # 2. Commit the resolved changes for the interrupted commit
+        if not self.svn.is_clean():
+            logger.info("Committing resolved commit %s to SVN...", current_commit)
+            self.svn.commit(current_msg)
+        else:
+            logger.info("No changes in SVN workspace to commit for %s (commit resolved as empty or skipped).", current_commit)
+
+        completed += 1
+        logger.info("Commit %s (%d/%d) resolved and committed.", current_commit, completed, total)
+
+        # 3. Resume remaining queue
+        if remaining:
+            self._execute_replay_queue(remaining, total_commits=total, start_index=completed + 1)
+        else:
+            clear_replay_state(self.svn.workspace_dir)
+            logger.info("Replay completed successfully! All %d commits applied.", total)
+
+    def replay_abort(self) -> None:
+        """Abort in-progress replay and revert uncommitted changes."""
+        state = load_replay_state(self.svn.workspace_dir)
+        if not state:
+            raise RuntimeError("No replay in progress. Nothing to abort.")
+
+        current = state["current_commit"]
+        logger.info("Aborting replay at commit %s...", current)
+        if not self.dry_run:
+            self.svn.revert_all()
+            clean_conflict_artifacts(self.svn.workspace_dir)
+            clear_replay_state(self.svn.workspace_dir)
+        logger.info("Replay aborted. SVN workspace reverted to last clean commit.")
+
+    def replay_skip(self) -> None:
+        """Skip current interrupted commit and proceed with remaining queue."""
+        state = load_replay_state(self.svn.workspace_dir)
+        if not state:
+            raise RuntimeError("No replay in progress. Nothing to skip.")
+
+        current = state["current_commit"]
+        remaining = state.get("remaining_commits", [])
+        total = state.get("total_commits", len(remaining) + 1)
+        completed = state.get("completed_commits", 0)
+
+        logger.info("Skipping commit %s...", current)
+        if not self.dry_run:
+            self.svn.revert_all()
+            clean_conflict_artifacts(self.svn.workspace_dir)
+
+        if remaining:
+            self._execute_replay_queue(remaining, total_commits=total, start_index=completed + 2)
+        else:
+            clear_replay_state(self.svn.workspace_dir)
+            logger.info("Replay finished (last commit was skipped).")
+
+    def _execute_replay_queue(self, commits: List[str], total_commits: int, start_index: int) -> None:
+        """Execute a list of commits sequentially, catching conflicts and persisting state."""
+        for idx, commit_hash in enumerate(commits, start=start_index):
+            commit_msg = self.git.get_commit_message(commit_hash)
+            first_line = commit_msg.splitlines()[0] if commit_msg else ""
+            logger.info("[%d/%d] Applying commit %s: %s", idx, total_commits, commit_hash[:8], first_line)
+
+            try:
+                self.cherry_pick(commit_hash, commit_svn=True)
+            except Exception as e:
+                # Patch conflict or staging error
+                remaining = commits[idx - start_index + 1:]
+                state_data = {
+                    "state": "CONFLICT_PAUSED",
+                    "git_dir": str(self.git.repo_dir),
+                    "svn_dir": str(self.svn.workspace_dir),
+                    "current_commit": commit_hash,
+                    "current_commit_msg": commit_msg,
+                    "remaining_commits": remaining,
+                    "total_commits": total_commits,
+                    "completed_commits": idx - 1,
+                }
+                if not self.dry_run:
+                    save_replay_state(self.svn.workspace_dir, state_data)
+
+                rej_files = find_conflict_artifacts(self.svn.workspace_dir)
+                rej_info = ""
+                if rej_files:
+                    rej_rel = [str(r.relative_to(self.svn.workspace_dir)) for r in rej_files]
+                    rej_info = f"\nConflicts detected in:\n" + "\n".join(f"  - {f}" for f in rej_rel)
+
+                print(
+                    f"\n[PAUSED] Conflict while applying commit {commit_hash[:8]} ({idx}/{total_commits}): \"{first_line}\""
+                    f"{rej_info}\n\n"
+                    f"To resolve:\n"
+                    f"  1. Resolve conflicts in '{self.svn.workspace_dir}' and stage changes ('svn add' / 'svn rm').\n"
+                    f"  2. Remove any leftover .rej / .orig files.\n"
+                    f"  3. Run: git2svn replay --continue\n"
+                    f"     (or 'git2svn replay --abort' to discard, or 'git2svn replay --skip' to skip)\n",
+                    file=sys.stderr,
+                )
+                raise
+        clear_replay_state(self.svn.workspace_dir)
+        logger.info("Replay completed successfully! All %d commits applied.", total_commits)
+
     def _ensure_parent_dirs_for_changes(self, changes: List[FileChange]) -> None:
         """Create parent directories in SVN workspace for new/renamed files."""
         for change in changes:
@@ -599,12 +822,53 @@ def build_parser() -> argparse.ArgumentParser:
     parser_sync.add_argument("base_ref", help="Base Git reference for diff comparison")
     parser_sync.add_argument("target_ref", help="Target Git reference with finalized state")
 
+    # replay
+    parser_replay = subparsers.add_parser(
+        "replay",
+        parents=[common_parser],
+        help="Fast-forward replay a series of commits one-by-one to SVN with conflict pause/resume",
+    )
+    parser_replay.add_argument("start_ref", nargs="?", default=None, help="Starting Git reference / base commit")
+    parser_replay.add_argument("end_ref", nargs="?", default=None, help="Ending Git reference / target commit")
+    action_group = parser_replay.add_mutually_exclusive_group()
+    action_group.add_argument(
+        "--continue",
+        dest="replay_action",
+        action="store_const",
+        const="continue",
+        default=argparse.SUPPRESS,
+        help="Continue an in-progress replay after resolving conflicts",
+    )
+    action_group.add_argument(
+        "--abort",
+        dest="replay_action",
+        action="store_const",
+        const="abort",
+        default=argparse.SUPPRESS,
+        help="Abort in-progress replay and revert uncommitted changes",
+    )
+    action_group.add_argument(
+        "--skip",
+        dest="replay_action",
+        action="store_const",
+        const="skip",
+        default=argparse.SUPPRESS,
+        help="Skip the current failed commit and continue with the next",
+    )
+
     return parser
 
 
 def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = build_parser()
-    namespace = argparse.Namespace(git_dir=None, svn_dir=None, dry_run=False, verbose=False, commit=False)
+    namespace = argparse.Namespace(
+        git_dir=None,
+        svn_dir=None,
+        dry_run=False,
+        verbose=False,
+        commit=False,
+        replay_action=None,
+    )
     return parser.parse_args(argv, namespace=namespace)
 
 
@@ -614,12 +878,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level, format="[%(levelname)s] %(message)s")
 
-    git_dir = args.git_dir or find_default_git_dir()
     svn_dir = args.svn_dir or (Path(os.environ["SVN_DIR"]) if "SVN_DIR" in os.environ else None)
+
+    # For replay resume/abort actions, auto-detect svn_dir from cwd if it is an SVN checkout
+    if not svn_dir and args.command == "replay" and getattr(args, "replay_action", None):
+        cwd = Path.cwd()
+        if (cwd / ".svn").exists() or load_replay_state(cwd):
+            svn_dir = cwd
 
     if not svn_dir:
         print("Error: SVN workspace directory must be specified with --svn-dir or the SVN_DIR environment variable.", file=sys.stderr)
         return 1
+
+    git_dir = args.git_dir
+    if not git_dir and args.command == "replay" and getattr(args, "replay_action", None):
+        state = load_replay_state(svn_dir)
+        if state and "git_dir" in state:
+            git_dir = Path(state["git_dir"])
+
+    git_dir = git_dir or find_default_git_dir()
 
     git_repo = GitRepo(git_dir)
     if not git_repo.is_valid_repo():
@@ -641,6 +918,19 @@ def main(argv: Optional[List[str]] = None) -> int:
             sync_mgr.squash(args.start_ref, args.end_ref)
         elif args.command == "sync":
             sync_mgr.sync(args.base_ref, args.target_ref)
+        elif args.command == "replay":
+            action = getattr(args, "replay_action", None)
+            if action == "continue":
+                sync_mgr.replay_continue()
+            elif action == "abort":
+                sync_mgr.replay_abort()
+            elif action == "skip":
+                sync_mgr.replay_skip()
+            else:
+                if not args.start_ref or not args.end_ref:
+                    print("Error: replay requires both start_ref and end_ref unless using --continue, --abort, or --skip.", file=sys.stderr)
+                    return 1
+                sync_mgr.replay(args.start_ref, args.end_ref)
         else:
             parser.print_help()
             return 1

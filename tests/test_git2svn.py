@@ -94,6 +94,25 @@ class TestCliArgs(unittest.TestCase):
         self.assertTrue(args.dry_run)
         self.assertTrue(args.verbose)
 
+    def test_replay_args(self):
+        args = git2svn.parse_cli_args(["replay", "main", "feature", "-s", "/path/to/svn"])
+        self.assertEqual(args.command, "replay")
+        self.assertEqual(args.start_ref, "main")
+        self.assertEqual(args.end_ref, "feature")
+        self.assertIsNone(args.replay_action)
+
+        args_cont = git2svn.parse_cli_args(["replay", "--continue", "-s", "/path/to/svn"])
+        self.assertEqual(args_cont.command, "replay")
+        self.assertEqual(args_cont.replay_action, "continue")
+
+        args_abort = git2svn.parse_cli_args(["replay", "--abort", "-s", "/path/to/svn"])
+        self.assertEqual(args_abort.command, "replay")
+        self.assertEqual(args_abort.replay_action, "abort")
+
+        args_skip = git2svn.parse_cli_args(["replay", "--skip", "-s", "/path/to/svn"])
+        self.assertEqual(args_skip.command, "replay")
+        self.assertEqual(args_skip.replay_action, "skip")
+
 
 class TestSvnWorkspace(unittest.TestCase):
     def setUp(self):
@@ -475,6 +494,143 @@ class TestSynchronizer(unittest.TestCase):
         ])
         self.assertEqual(code, 0)
         self.assertEqual((self.svn_path / "cli_test.txt").read_text(), "cli test\n")
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_clean_series(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Base commit
+        f = self.git_path / "file.txt"
+        f.write_text("v0\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        (self.svn_path / "file.txt").write_text("v0\n")
+
+        # Commit 1
+        f.write_text("v1\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 1"], cwd=self.git_path, check=True)
+
+        # Commit 2
+        f.write_text("v2\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 2"], cwd=self.git_path, check=True)
+        target_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        self.sync_mgr.replay(base_hash, target_hash)
+
+        # Check final content in SVN
+        self.assertEqual((self.svn_path / "file.txt").read_text(), "v2\n")
+
+        # Check commit commands were called with their respective messages
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertIn(["commit", "-m", "commit 1"], called_args)
+        self.assertIn(["commit", "-m", "commit 2"], called_args)
+
+    def test_replay_dirty_workspace_error(self):
+        with patch.object(git2svn.SvnWorkspace, "is_clean", return_value=False):
+            with self.assertRaises(RuntimeError) as ctx:
+                self.sync_mgr.replay("HEAD~1", "HEAD")
+            self.assertIn("uncommitted changes", str(ctx.exception))
+
+    def test_replay_merges_error(self):
+        with patch.object(git2svn.SvnWorkspace, "is_clean", return_value=True):
+            with patch.object(git2svn.GitRepo, "get_merge_commits", return_value=["mergehash123"]):
+                with self.assertRaises(RuntimeError) as ctx:
+                    self.sync_mgr.replay("HEAD~1", "HEAD")
+                self.assertIn("merge commit", str(ctx.exception))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_conflict_pause_and_continue(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Base commit
+        f = self.git_path / "conflict_test.txt"
+        f.write_text("line A\nline B\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        # SVN workspace starts with divergent line
+        (self.svn_path / "conflict_test.txt").write_text("line DIFFERENT\nline B\n")
+
+        # Git commit 1 (changes line A, which will conflict with line DIFFERENT)
+        f.write_text("line A MODIFIED\nline B\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "commit with conflict"], cwd=self.git_path, check=True)
+        c1_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        # Git commit 2
+        f2 = self.git_path / "next_file.txt"
+        f2.write_text("next\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 2"], cwd=self.git_path, check=True)
+        c2_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        # Replay should fail on commit 1 with conflict
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.sync_mgr.replay(base_hash, c2_hash)
+
+        # State file should exist in .svn/git2svn-replay.json
+        state = git2svn.load_replay_state(self.svn_path)
+        self.assertIsNotNone(state)
+        self.assertEqual(state["current_commit"], c1_hash)
+        self.assertEqual(state["remaining_commits"], [c2_hash])
+
+        # Clean up any .rej file before continue
+        git2svn.clean_conflict_artifacts(self.svn_path)
+        (self.svn_path / "conflict_test.txt").write_text("line A MODIFIED\nline B\n")
+
+        # Now continue replay
+        self.sync_mgr.replay_continue()
+
+        # Check final content of both files in SVN
+        self.assertEqual((self.svn_path / "conflict_test.txt").read_text(), "line A MODIFIED\nline B\n")
+        self.assertEqual((self.svn_path / "next_file.txt").read_text(), "next\n")
+
+        # State file should now be cleared
+        self.assertIsNone(git2svn.load_replay_state(self.svn_path))
+
+    def test_replay_continue_rejects_leftover_artifacts(self):
+        state_data = {
+            "current_commit": "abc",
+            "current_commit_msg": "test",
+            "remaining_commits": [],
+        }
+        git2svn.save_replay_state(self.svn_path, state_data)
+
+        # Create leftover .rej file
+        rej_file = self.svn_path / "file.txt.rej"
+        rej_file.write_text("hunk failed")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.sync_mgr.replay_continue()
+        self.assertIn("rejected patch artifacts", str(ctx.exception))
+
+        rej_file.unlink()
+        git2svn.clear_replay_state(self.svn_path)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_abort(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        state_data = {
+            "current_commit": "abc",
+            "current_commit_msg": "test",
+            "remaining_commits": [],
+        }
+        git2svn.save_replay_state(self.svn_path, state_data)
+        rej = self.svn_path / "bad.txt.rej"
+        rej.write_text("rej")
+
+        self.sync_mgr.replay_abort()
+
+        self.assertIsNone(git2svn.load_replay_state(self.svn_path))
+        self.assertFalse(rej.exists())
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertIn(["revert", "-R", "."], called_args)
 
 
 if __name__ == "__main__":
