@@ -226,8 +226,8 @@ When using `git2svn` alongside an incremental SVN-to-Git mirror (such as `all-fa
 flowchart TD
     Feature["feature/* (working branches)"] -->|1. git rebase & merge --ff-only| Trunk["local 'trunk' (staging branch)"]
     Trunk -->|2. git2svn replay -u| SVN["Local SVN Workspace"]
-    SVN -->|3. svn commit (automatic in replay)| Upstream["Remote SVN Repository"]
-    Upstream -->|4. incremental mirror (svn2git)| Mirror["svn-mirror/trunk (tracking branch)"]
+    SVN -->|"3. svn commit (automatic in replay)"| Upstream["Remote SVN Repository"]
+    Upstream -->|"4. incremental mirror (svn2git)"| Mirror["svn-mirror/trunk (tracking branch)"]
     Mirror -->|5. git checkout trunk && git reset --hard| Trunk
 ```
 
