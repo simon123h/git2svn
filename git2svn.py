@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-git2svn: A CLI utility to synchronize changes from a local Git repository
+git2svn: A consolidated CLI utility to synchronize changes from a local Git repository
 to a local Subversion (SVN) working copy.
 
 Commands:
-    cherry-pick <commit_hash>       Port a single Git commit to SVN using patch -p1.
-    squash <start_ref> <end_ref>    Port a commit range to SVN using patch -p1.
-    sync <base_ref> <target_ref>    Port changes by brute-force copying files using shutil.
+    stage <ref> [ref2] [--copy]     Prepare changes in SVN workspace without committing (for review).
+    replay <ref> [ref2]             Port commits to SVN and commit each with its original Git message.
+    replay --continue|--abort|--skip
+                                    Manage interrupted replay on patch conflict.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ def clean_conflict_artifacts(workspace_dir: Path) -> List[Path]:
 
 
 def get_replay_state_path(workspace_dir: Path) -> Path:
-    """Get the path to the replay state file."""
+    """Get the path to the replay state file inside .svn metadata or workspace root."""
     svn_meta = workspace_dir / ".svn"
     if svn_meta.is_dir():
         return svn_meta / "git2svn-replay.json"
@@ -80,11 +81,32 @@ def clear_replay_state(workspace_dir: Path) -> None:
         path.unlink(missing_ok=True)
 
 
+def parse_ref_arguments(primary_ref: Optional[str], secondary_ref: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
+    """
+    Parses CLI ref arguments into either a single commit or a (start_ref, end_ref) range.
+    Returns: (is_single, start_or_commit, end_ref)
+    Examples:
+        'abc1234' -> (True, 'abc1234', None)
+        'main..feature' -> (False, 'main', 'feature')
+        'main', 'feature' -> (False, 'main', 'feature')
+    """
+    if not primary_ref:
+        raise ValueError("A commit reference or range is required.")
+
+    if secondary_ref:
+        return False, primary_ref, secondary_ref
+
+    if ".." in primary_ref:
+        parts = primary_ref.split("..", 1)
+        return False, parts[0], parts[1]
+
+    return True, primary_ref, None
+
+
 class FileChange:
     """Represents a file change between two Git revisions."""
 
     def __init__(self, action: str, path: str, old_path: Optional[str] = None):
-        # action is typically 'A', 'D', 'M', 'R', or 'C'
         self.action = action.upper()
         self.path = Path(path)
         self.old_path = Path(old_path) if old_path else None
@@ -116,15 +138,7 @@ class FileChange:
 
 
 def parse_name_status(status_output: str) -> List[FileChange]:
-    """
-    Parse the standard tabular output of `git diff --name-status`.
-    Handles tab-separated lines such as:
-        A       new_file.txt
-        M       modified_file.txt
-        D       deleted_file.txt
-        R100    old_name.txt    new_name.txt
-        C100    src_name.txt    dst_name.txt
-    """
+    """Parse standard tabular output of `git diff --name-status`."""
     changes: List[FileChange] = []
     for line in status_output.splitlines():
         line = line.strip()
@@ -155,10 +169,7 @@ def parse_name_status(status_output: str) -> List[FileChange]:
 
 
 def parse_name_status_z(null_output: str) -> List[FileChange]:
-    """
-    Parse NUL-delimited output from `git diff -z --name-status`.
-    This handles special characters and paths with spaces robustly.
-    """
+    """Parse NUL-delimited output from `git diff -z --name-status`."""
     changes: List[FileChange] = []
     tokens = null_output.split("\0")
     idx = 0
@@ -226,7 +237,6 @@ class GitRepo:
 
     def get_diff_root(self, commit_hash: str) -> str:
         """Get unified diff for a root commit."""
-        # Diff against Git's empty tree hash
         empty_tree_hash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
         res = self.run_cmd(["diff", "--binary", empty_tree_hash, commit_hash])
         return res.stdout
@@ -250,8 +260,7 @@ class GitRepo:
     def get_commit_range(self, start_ref: str, end_ref: str) -> List[str]:
         """Return list of commit hashes in chronological order (start_ref..end_ref)."""
         res = self.run_cmd(["rev-list", "--reverse", "--topo-order", f"{start_ref}..{end_ref}"])
-        lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
-        return lines
+        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
     def get_merge_commits(self, start_ref: str, end_ref: str) -> List[str]:
         """Return list of merge commits in the range (start_ref..end_ref)."""
@@ -288,7 +297,6 @@ class SvnWorkspace:
             return False
         if (self.workspace_dir / ".svn").exists():
             return True
-        # Fallback check via svn info
         try:
             res = self.run_cmd(["info"], check=False)
             return res.returncode == 0
@@ -316,7 +324,6 @@ class SvnWorkspace:
         posix_path = rel_path.as_posix()
         res = self.run_cmd(["add", posix_path, "--parents"], check=False)
         if res.returncode != 0:
-            # Check if it was already versioned (common in repeated runs)
             if "is already under version control" not in res.stderr and "already exists" not in res.stderr:
                 logger.error("Failed to 'svn add %s': %s", posix_path, res.stderr.strip())
                 raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "add", posix_path], res.stdout, res.stderr)
@@ -433,7 +440,7 @@ class Patcher:
                 print(proc.stdout, file=sys.stderr)
             if proc.stderr:
                 print(proc.stderr, file=sys.stderr)
-            print("Tip: Check for .rej reject files in the SVN workspace or use 'git2svn sync' to copy files directly.", file=sys.stderr)
+            print("Tip: Check for .rej reject files in the SVN workspace or use 'git2svn stage --copy' to copy files directly.", file=sys.stderr)
             raise subprocess.CalledProcessError(proc.returncode, cmd, proc.stdout, proc.stderr)
         else:
             if proc.stdout:
@@ -455,147 +462,63 @@ class Synchronizer:
         self.patcher = patcher
         self.dry_run = dry_run
 
-    def cherry_pick(self, commit_hash: str, commit_svn: bool = False) -> None:
+    def stage(self, ref1: str, ref2: Optional[str] = None, use_copy: bool = False) -> None:
         """
-        Port a single Git commit to SVN workspace:
-        1. Extract diff of specified commit (<commit>^..<commit>).
-        2. Apply diff to SVN workspace using patch -p1.
-        3. Parse git diff --name-status and apply SVN structural commands.
-        4. Optionally commit to SVN using the exact Git commit message.
+        Stage changes from a commit or range in SVN workspace without committing.
+        If use_copy=True, brute-force copies files using shutil (bypassing patch).
         """
-        logger.info("Running cherry-pick for commit %s", commit_hash)
-        parent = self.git.get_commit_parent(commit_hash)
-        if parent:
-            ref_spec = f"{parent}..{commit_hash}"
-            diff_text = self.git.get_diff(ref_spec)
-            changes = self.git.get_name_status(ref_spec)
+        is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
+        if is_single:
+            commit_hash = start_or_commit
+            logger.info("Staging single commit %s (copy_mode=%s)", commit_hash, use_copy)
+            if use_copy:
+                parent = self.git.get_commit_parent(commit_hash)
+                base_ref = parent if parent else "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+                self._copy_and_stage_range(base_ref, commit_hash)
+            else:
+                self._patch_and_stage_commit(commit_hash)
         else:
-            logger.info("Commit %s is a root commit (no parent).", commit_hash)
-            diff_text = self.git.get_diff_root(commit_hash)
-            changes = self.git.get_name_status_root(commit_hash)
+            start_ref = start_or_commit
+            assert end_ref is not None
+            logger.info("Staging range %s..%s (copy_mode=%s)", start_ref, end_ref, use_copy)
+            if use_copy:
+                self._copy_and_stage_range(start_ref, end_ref)
+            else:
+                self._patch_and_stage_range(start_ref, end_ref)
+        logger.info("Changes staged successfully in SVN workspace (uncommitted).")
 
-        self._ensure_parent_dirs_for_changes(changes)
-
-        logger.info("Applying patch diff...")
-        self.patcher.apply_diff(diff_text)
-
-        logger.info("Staging SVN structural changes...")
-        self.svn.apply_structural_changes(changes)
-
-        if commit_svn:
-            commit_msg = self.git.get_commit_message(commit_hash)
-            logger.info("Committing to SVN with Git commit message:\n%s", commit_msg)
-            self.svn.commit(commit_msg)
-
-        logger.info("Cherry-pick completed successfully.")
-
-    def squash(self, start_ref: str, end_ref: str) -> None:
+    def replay(self, ref1: str, ref2: Optional[str] = None) -> None:
         """
-        Port a continuous range of Git commits (<start_ref>..<end_ref>) to SVN workspace:
-        1. Extract diff between the two references.
-        2. Apply diff to SVN workspace using patch -p1.
-        3. Parse git diff --name-status and apply SVN structural commands.
+        Replay a single commit or range of commits onto SVN, committing each with its Git message.
         """
-        logger.info("Running squash from %s to %s", start_ref, end_ref)
-        ref_spec = f"{start_ref}..{end_ref}"
-        diff_text = self.git.get_diff(ref_spec)
-        changes = self.git.get_name_status(ref_spec)
+        is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
+        if is_single:
+            commit_hash = start_or_commit
+            logger.info("Replaying single commit %s", commit_hash)
+            self._execute_replay_queue([commit_hash], total_commits=1, start_index=1)
+        else:
+            start_ref = start_or_commit
+            assert end_ref is not None
 
-        self._ensure_parent_dirs_for_changes(changes)
+            if not self.dry_run and not self.svn.is_clean():
+                raise RuntimeError(
+                    "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
+                )
 
-        logger.info("Applying patch diff...")
-        self.patcher.apply_diff(diff_text)
+            merges = self.git.get_merge_commits(start_ref, end_ref)
+            if merges:
+                raise RuntimeError(
+                    f"Range {start_ref}..{end_ref} contains {len(merges)} merge commit(s). "
+                    "Replay requires a linear history (fast-forward only). Please rebase your branch first."
+                )
 
-        logger.info("Staging SVN structural changes...")
-        self.svn.apply_structural_changes(changes)
-        logger.info("Squash completed successfully.")
+            commits = self.git.get_commit_range(start_ref, end_ref)
+            if not commits:
+                logger.info("No commits found in range %s..%s.", start_ref, end_ref)
+                return
 
-    def sync(self, base_ref: str, target_ref: str) -> None:
-        """
-        Port changes by brute-force copying files using shutil:
-        1. Identify changed files between base_ref and target_ref.
-        2. Copy modified/added files from Git workspace to SVN workspace.
-        3. Parse git diff --name-status and apply SVN structural commands.
-        """
-        logger.info("Running sync from %s to %s", base_ref, target_ref)
-        ref_spec = f"{base_ref}..{target_ref}"
-        changes = self.git.get_name_status(ref_spec)
-
-        # 1. Handle deleted files in SVN first
-        for change in changes:
-            if change.is_deleted:
-                logger.info("SVN staging delete: %s", change.path)
-                self.svn.stage_rm(change.path)
-                # Ensure deleted from disk as well
-                target_file = self.svn.workspace_dir / change.path
-                if not self.dry_run and target_file.exists():
-                    if target_file.is_dir():
-                        shutil.rmtree(target_file)
-                    else:
-                        target_file.unlink()
-            elif change.is_renamed:
-                assert change.old_path is not None
-                logger.info("SVN staging rename (removal of old path): %s", change.old_path)
-                self.svn.stage_rm(change.old_path)
-                target_old = self.svn.workspace_dir / change.old_path
-                if not self.dry_run and target_old.exists():
-                    target_old.unlink()
-
-        # 2. Copy added, modified, renamed, and copied files
-        for change in changes:
-            if change.is_added or change.is_modified or change.is_renamed or change.is_copied:
-                src_path = self.git.repo_dir / change.path
-                dst_path = self.svn.workspace_dir / change.path
-
-                if not src_path.exists():
-                    logger.warning("Source file not found in Git workspace: %s", src_path)
-                    print(f"Warning: '{src_path}' does not exist on disk in Git workspace. Make sure '{target_ref}' is checked out in Git.", file=sys.stderr)
-                    continue
-
-                if self.dry_run:
-                    print(f"[DRY-RUN] Copy {src_path} -> {dst_path}")
-                else:
-                    dst_path.parent.mkdir(parents=True, exist_ok=True)
-                    if src_path.is_symlink():
-                        if dst_path.exists() or dst_path.is_symlink():
-                            dst_path.unlink()
-                        shutil.copy2(src_path, dst_path, follow_symlinks=False)
-                    elif src_path.is_file():
-                        shutil.copy2(src_path, dst_path)
-
-        # 3. Stage added, renamed, and copied files in SVN
-        for change in changes:
-            if change.is_added or change.is_renamed or change.is_copied:
-                logger.info("SVN staging addition: %s", change.path)
-                self.svn.stage_add(change.path)
-
-        logger.info("Sync completed successfully.")
-
-    def replay(self, start_ref: str, end_ref: str) -> None:
-        """
-        Replay a series of Git commits (start_ref..end_ref) sequentially onto SVN.
-        Each commit is patched, staged, and committed using its Git commit message.
-        If a conflict occurs, state is saved so user can resume with --continue.
-        """
-        if not self.dry_run and not self.svn.is_clean():
-            raise RuntimeError(
-                "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
-            )
-
-        merges = self.git.get_merge_commits(start_ref, end_ref)
-        if merges:
-            raise RuntimeError(
-                f"Range {start_ref}..{end_ref} contains {len(merges)} merge commit(s). "
-                "Replay requires a linear history (fast-forward only). Please rebase your branch first."
-            )
-
-        commits = self.git.get_commit_range(start_ref, end_ref)
-        if not commits:
-            logger.info("No commits found in range %s..%s.", start_ref, end_ref)
-            return
-
-        logger.info("Starting replay of %d commit(s) from %s to %s...", len(commits), start_ref, end_ref)
-        self._execute_replay_queue(commits, total_commits=len(commits), start_index=1)
+            logger.info("Starting replay of %d commit(s) from %s to %s...", len(commits), start_ref, end_ref)
+            self._execute_replay_queue(commits, total_commits=len(commits), start_index=1)
 
     def replay_continue(self) -> None:
         """Resume an interrupted replay after user resolves conflicts."""
@@ -679,9 +602,9 @@ class Synchronizer:
             logger.info("[%d/%d] Applying commit %s: %s", idx, total_commits, commit_hash[:8], first_line)
 
             try:
-                self.cherry_pick(commit_hash, commit_svn=True)
+                self._patch_and_stage_commit(commit_hash)
+                self.svn.commit(commit_msg)
             except Exception as e:
-                # Patch conflict or staging error
                 remaining = commits[idx - start_index + 1:]
                 state_data = {
                     "state": "CONFLICT_PAUSED",
@@ -715,6 +638,80 @@ class Synchronizer:
                 raise
         clear_replay_state(self.svn.workspace_dir)
         logger.info("Replay completed successfully! All %d commits applied.", total_commits)
+
+    def _patch_and_stage_commit(self, commit_hash: str) -> None:
+        """Extract diff for a single commit, apply using patch, and stage in SVN."""
+        parent = self.git.get_commit_parent(commit_hash)
+        if parent:
+            ref_spec = f"{parent}..{commit_hash}"
+            diff_text = self.git.get_diff(ref_spec)
+            changes = self.git.get_name_status(ref_spec)
+        else:
+            diff_text = self.git.get_diff_root(commit_hash)
+            changes = self.git.get_name_status_root(commit_hash)
+
+        self._ensure_parent_dirs_for_changes(changes)
+        self.patcher.apply_diff(diff_text)
+        self.svn.apply_structural_changes(changes)
+
+    def _patch_and_stage_range(self, start_ref: str, end_ref: str) -> None:
+        """Extract diff between two references, apply using patch, and stage in SVN."""
+        ref_spec = f"{start_ref}..{end_ref}"
+        diff_text = self.git.get_diff(ref_spec)
+        changes = self.git.get_name_status(ref_spec)
+
+        self._ensure_parent_dirs_for_changes(changes)
+        self.patcher.apply_diff(diff_text)
+        self.svn.apply_structural_changes(changes)
+
+    def _copy_and_stage_range(self, base_ref: str, target_ref: str) -> None:
+        """Brute-force copy changed files using shutil, and stage in SVN."""
+        ref_spec = f"{base_ref}..{target_ref}"
+        changes = self.git.get_name_status(ref_spec)
+
+        # 1. Handle deleted files in SVN first
+        for change in changes:
+            if change.is_deleted:
+                self.svn.stage_rm(change.path)
+                target_file = self.svn.workspace_dir / change.path
+                if not self.dry_run and target_file.exists():
+                    if target_file.is_dir():
+                        shutil.rmtree(target_file)
+                    else:
+                        target_file.unlink()
+            elif change.is_renamed:
+                assert change.old_path is not None
+                self.svn.stage_rm(change.old_path)
+                target_old = self.svn.workspace_dir / change.old_path
+                if not self.dry_run and target_old.exists():
+                    target_old.unlink()
+
+        # 2. Copy added, modified, renamed, and copied files
+        for change in changes:
+            if change.is_added or change.is_modified or change.is_renamed or change.is_copied:
+                src_path = self.git.repo_dir / change.path
+                dst_path = self.svn.workspace_dir / change.path
+
+                if not src_path.exists():
+                    logger.warning("Source file not found in Git workspace: %s", src_path)
+                    print(f"Warning: '{src_path}' does not exist on disk in Git workspace. Make sure '{target_ref}' is checked out in Git.", file=sys.stderr)
+                    continue
+
+                if self.dry_run:
+                    print(f"[DRY-RUN] Copy {src_path} -> {dst_path}")
+                else:
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    if src_path.is_symlink():
+                        if dst_path.exists() or dst_path.is_symlink():
+                            dst_path.unlink()
+                        shutil.copy2(src_path, dst_path, follow_symlinks=False)
+                    elif src_path.is_file():
+                        shutil.copy2(src_path, dst_path)
+
+        # 3. Stage added, renamed, and copied files in SVN
+        for change in changes:
+            if change.is_added or change.is_renamed or change.is_copied:
+                self.svn.stage_add(change.path)
 
     def _ensure_parent_dirs_for_changes(self, changes: List[FileChange]) -> None:
         """Create parent directories in SVN workspace for new/renamed files."""
@@ -778,58 +775,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="git2svn",
-        description="Synchronize commits and changes from a local Git repository to a local SVN workspace.",
+        description="Consolidated utility to synchronize Git revisions to an SVN workspace.",
         parents=[common_parser],
     )
 
     subparsers = parser.add_subparsers(
         dest="command",
         title="commands",
-        description="Valid subcommands",
+        description="Available commands",
         required=True,
     )
 
-    # cherry-pick
-    parser_cp = subparsers.add_parser(
-        "cherry-pick",
+    # stage
+    parser_stage = subparsers.add_parser(
+        "stage",
         parents=[common_parser],
-        help="Port a single Git commit to SVN using patch -p1",
+        help="Stage changes in SVN workspace without committing (for review)",
     )
-    parser_cp.add_argument("commit_hash", help="Git commit hash to port")
-    parser_cp.add_argument(
-        "--commit",
-        "-c",
+    parser_stage.add_argument("ref1", help="Commit hash or start ref (e.g. 'abc1234' or 'main..feature' or 'main')")
+    parser_stage.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
+    parser_stage.add_argument(
+        "--copy",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Commit staged changes to SVN using the exact Git commit message",
+        help="Brute-force copy modified/added files using shutil (bypasses patch; ideal for binaries/conflicts)",
     )
-
-    # squash
-    parser_sq = subparsers.add_parser(
-        "squash",
-        parents=[common_parser],
-        help="Port a commit range (e.g. feature branch) to SVN using patch -p1",
-    )
-    parser_sq.add_argument("start_ref", help="Starting Git reference / commit / branch")
-    parser_sq.add_argument("end_ref", help="Ending Git reference / commit / branch")
-
-    # sync
-    parser_sync = subparsers.add_parser(
-        "sync",
-        parents=[common_parser],
-        help="Port changes by brute-force copying files using shutil (ideal for binaries/conflicts)",
-    )
-    parser_sync.add_argument("base_ref", help="Base Git reference for diff comparison")
-    parser_sync.add_argument("target_ref", help="Target Git reference with finalized state")
 
     # replay
     parser_replay = subparsers.add_parser(
         "replay",
         parents=[common_parser],
-        help="Fast-forward replay a series of commits one-by-one to SVN with conflict pause/resume",
+        help="Replay commit(s) sequentially onto SVN, committing each with its Git message",
     )
-    parser_replay.add_argument("start_ref", nargs="?", default=None, help="Starting Git reference / base commit")
-    parser_replay.add_argument("end_ref", nargs="?", default=None, help="Ending Git reference / target commit")
+    parser_replay.add_argument("ref1", nargs="?", default=None, help="Commit hash or start ref")
+    parser_replay.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
     action_group = parser_replay.add_mutually_exclusive_group()
     action_group.add_argument(
         "--continue",
@@ -866,7 +845,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         svn_dir=None,
         dry_run=False,
         verbose=False,
-        commit=False,
+        copy=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -880,7 +859,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     svn_dir = args.svn_dir or (Path(os.environ["SVN_DIR"]) if "SVN_DIR" in os.environ else None)
 
-    # For replay resume/abort actions, auto-detect svn_dir from cwd if it is an SVN checkout
+    # Auto-detect svn_dir from cwd for replay actions if cwd is an SVN checkout
     if not svn_dir and args.command == "replay" and getattr(args, "replay_action", None):
         cwd = Path.cwd()
         if (cwd / ".svn").exists() or load_replay_state(cwd):
@@ -912,12 +891,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=args.dry_run)
 
     try:
-        if args.command == "cherry-pick":
-            sync_mgr.cherry_pick(args.commit_hash, commit_svn=getattr(args, "commit", False))
-        elif args.command == "squash":
-            sync_mgr.squash(args.start_ref, args.end_ref)
-        elif args.command == "sync":
-            sync_mgr.sync(args.base_ref, args.target_ref)
+        if args.command == "stage":
+            sync_mgr.stage(args.ref1, args.ref2, use_copy=getattr(args, "copy", False))
         elif args.command == "replay":
             action = getattr(args, "replay_action", None)
             if action == "continue":
@@ -927,10 +902,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             elif action == "skip":
                 sync_mgr.replay_skip()
             else:
-                if not args.start_ref or not args.end_ref:
-                    print("Error: replay requires both start_ref and end_ref unless using --continue, --abort, or --skip.", file=sys.stderr)
+                if not args.ref1:
+                    print("Error: replay requires a commit or range unless using --continue, --abort, or --skip.", file=sys.stderr)
                     return 1
-                sync_mgr.replay(args.start_ref, args.end_ref)
+                sync_mgr.replay(args.ref1, args.ref2)
         else:
             parser.print_help()
             return 1

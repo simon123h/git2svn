@@ -1,6 +1,6 @@
 # Git-to-SVN Synchronization CLI (`git2svn`)
 
-A lightweight, zero-dependency Python 3 CLI utility to bridge local Git development workspaces with an SVN monorepo working copy. It ports commits and branch changes accurately to SVN and stages structural operations (`svn add --parents`, `svn rm`), leaving final review and commits to the developer.
+A lightweight, zero-dependency Python 3 CLI utility to bridge local Git development workspaces with an SVN monorepo working copy. It provides two symmetrical, intuitive commands to either stage changes for manual review (`stage`) or sequentially commit them into SVN history (`replay`).
 
 ---
 
@@ -13,10 +13,12 @@ This utility bridges the gap when pushing work back to SVN:
 * **Git Workspace:** Active local development on feature/bugfix branches.
 * **SVN Workspace:** Standard local SVN working copy used for code review and committing back to the upstream SVN server (via CLI or TortoiseSVN).
 
-### 1.2 Architectural Constraints
+### 1.2 Core Architectural Principles
 * **Python 3 Standard Library:** Zero external dependencies (`argparse`, `subprocess`, `shutil`, `pathlib`).
-* **Non-destructive:** The utility **never** executes `svn commit`. Final review and commits remain strictly under developer control.
-* **Local Operations:** Runs entirely on local file paths without requiring SVN remote credentials or network connectivity during staging.
+* **Clean Separation of Intent:**
+  * **`stage`:** Never commits. Prepares and stages changes (`svn add --parents`, `svn rm`) in the SVN workspace so you can inspect them via TortoiseSVN before committing.
+  * **`replay`:** Always commits. Ports each Git commit into SVN history with its original commit message and stateful conflict pause/resume.
+* **Flexible Reference Syntax:** Both commands accept a single commit (`abc1234`), a range with dot notation (`main..feature`), or two positional arguments (`main feature`).
 
 ---
 
@@ -26,32 +28,29 @@ This utility bridges the gap when pushing work back to SVN:
 flowchart TD
     Git[Git Workspace] -->|git diff / name-status| Bridge[git2svn CLI]
     Bridge -->|patch -p1 or shutil.copy2| SVN[SVN Working Copy]
-    Bridge -->|svn add --parents| SVN
-    Bridge -->|svn rm| SVN
-    SVN -->|Manual Review & svn commit| Upstream[(SVN Server)]
+    Bridge -->|svn add --parents / svn rm| SVN
+    SVN -->|Review & Manual svn commit| Upstream[(SVN Server)]
+    Bridge -.->|replay auto svn commit| Upstream
 ```
 
-### 2.1 Subcommands & Flow
+### 2.1 Consolidated Subcommands
 
 ```mermaid
 flowchart LR
     subgraph Commands
-        CP["cherry-pick &lt;commit&gt;"]
-        SQ["squash &lt;start&gt; &lt;end&gt;"]
-        SY["sync &lt;base&gt; &lt;target&gt;"]
-        RP["replay &lt;start&gt; &lt;end&gt;"]
+        ST["stage &lt;ref&gt; [ref2]"]
+        RP["replay &lt;ref&gt; [ref2]"]
     end
 
     subgraph Operations
         P["Diff & patch -p1"]
-        C["shutil.copy2 (Binary/Force)"]
+        C["shutil.copy2 (--copy)"]
         S["SVN Staging (add/rm)"]
         CM["svn commit (Git msg)"]
     end
 
-    CP --> P --> S
-    SQ --> P --> S
-    SY --> C --> S
+    ST --> P --> S
+    ST -.->|--copy| C --> S
     RP --> P --> S --> CM
 ```
 
@@ -88,68 +87,59 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 
 ---
 
-### 4.2 Subcommand A: `cherry-pick <commit_hash>`
+### 4.2 Command 1: `stage <ref1> [ref2] [--copy]`
 
-Extracts the diff of a specific commit (`<commit>^..<commit>`) and applies it to the SVN workspace using `patch -p1`, followed by structural staging.
+Prepares changes in the SVN workspace **without committing**, ready for review in TortoiseSVN or CLI.
 
-* `--commit`, `-c`: Automatically commit staged changes to SVN using the exact Git commit message.
+* **Single Commit:** Ports the diff of a single commit.
+  ```bash
+  # Stage a single commit
+  ./git2svn.py stage a1b2c3d4 --svn-dir /path/to/svn
+  ```
+* **Range (Squash):** Squashes an entire branch into a single set of uncommitted SVN changes.
+  ```bash
+  # Stage a range using dot notation
+  ./git2svn.py stage master..feature/login --svn-dir /path/to/svn
 
-```bash
-# Example: Port a single bugfix commit (staged only, manual review)
-./git2svn.py cherry-pick a1b2c3d4 --svn-dir /home/simon/svn/repo/trunk
-
-# Example: Port and commit directly with the Git commit message
-./git2svn.py cherry-pick a1b2c3d4 -c --svn-dir /home/simon/svn/repo/trunk
-```
-
----
-
-### 4.3 Subcommand B: `squash <start_ref> <end_ref>`
-
-Ports a continuous range of Git commits (e.g. an entire feature branch) as a single unified changeset using `patch -p1`.
-
-```bash
-# Example: Squash an entire feature branch onto SVN trunk
-./git2svn.py squash master feature/login-page --svn-dir /home/simon/svn/repo/trunk
-```
-
----
-
-### 4.4 Subcommand C: `sync <base_ref> <target_ref>`
-
-Performs a brute-force file copy using Python's `shutil` for all modified and added files, bypassing the patch utility entirely.
-
-> [!TIP]
-> Use `sync` when dealing with binary files (images, compiled assets, PDFs), extensive refactors, or patch fuzz conflicts where `patch -p1` cannot cleanly apply.
-
-```bash
-# Example: Brute-force sync of branch changes
-./git2svn.py sync master feature/asset-overhaul --svn-dir /home/simon/svn/repo/trunk
-```
+  # Stage a range using two arguments
+  ./git2svn.py stage master feature/login --svn-dir /path/to/svn
+  ```
+* **Binary / Conflict Fallback (`--copy`):**
+  Uses Python's `shutil` to physically copy modified/added files instead of `patch -p1`.
+  ```bash
+  # Brute-force file copy (ideal for binaries, images, or heavy refactors)
+  ./git2svn.py stage master..feature/assets --copy --svn-dir /path/to/svn
+  ```
 
 ---
 
-### 4.5 Subcommand D: `replay <start_ref> <end_ref>`
+### 4.3 Command 2: `replay <ref1> [ref2]`
 
-Sequentially ports a series of Git commits one-by-one to the SVN workspace, creating an individual `svn commit` for each Git commit using its original commit message.
+Sequentially ports Git commit(s) onto the SVN workspace, creating an atomic `svn commit` for each with its original Git commit message.
 
-```bash
-# Example: Replay a series of 5 commits onto SVN
-./git2svn.py replay master feature/login-flow --svn-dir /home/simon/svn/repo/trunk
-```
+* **Single Commit (Cherry-pick):**
+  ```bash
+  # Replay and commit a single Git commit
+  ./git2svn.py replay a1b2c3d4 --svn-dir /path/to/svn
+  ```
+* **Range (Fast-forward Merge):**
+  ```bash
+  # Replay an entire feature branch commit-by-commit
+  ./git2svn.py replay master..feature/login --svn-dir /path/to/svn
+  ```
 
 #### Conflict Pause & Resume Workflow
-If a commit fails to apply cleanly (patch reject / conflict):
-1. **The replay halts immediately:** The SVN workspace remains cleanly committed up to the last successful commit. Replay state is saved in `<svn_dir>/.svn/git2svn-replay.json`.
-2. **Resolve the conflict:** Open the conflicting file in your SVN workspace, resolve the issue, stage any file additions/removals with `svn add` or `svn rm`, and delete the leftover `*.rej` / `*.orig` files.
+If a patch conflict occurs during a replay:
+1. **Execution pauses:** The SVN workspace remains cleanly committed up to the last successful commit. Replay state is saved in `<svn_dir>/.svn/git2svn-replay.json`.
+2. **Resolve the issue:** Fix conflicting files in your SVN workspace, stage new/deleted files with `svn add` / `svn rm`, and delete any leftover `*.rej` / `*.orig` files.
 3. **Resume replay:**
    ```bash
    ./git2svn.py replay --continue
    ```
-   *(This commits the resolved changeset using the paused Git commit's message and continues replaying the remaining queue).*
+   *(This automatically commits the resolved changeset with the Git message and continues with the rest of the queue).*
 
 #### Conflict Abort & Skip
-* **Abort:** Discards uncommitted changes from the failed commit and resets the SVN working copy:
+* **Abort:** Reverts uncommitted changes from the failed commit and resets the SVN working copy:
   ```bash
   ./git2svn.py replay --abort
   ```

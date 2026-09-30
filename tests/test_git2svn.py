@@ -10,6 +10,30 @@ from unittest.mock import MagicMock, call, patch
 import git2svn
 
 
+class TestParseRefArguments(unittest.TestCase):
+    def test_single_commit(self):
+        is_single, start, end = git2svn.parse_ref_arguments("abc1234")
+        self.assertTrue(is_single)
+        self.assertEqual(start, "abc1234")
+        self.assertIsNone(end)
+
+    def test_range_dot_notation(self):
+        is_single, start, end = git2svn.parse_ref_arguments("main..feature")
+        self.assertFalse(is_single)
+        self.assertEqual(start, "main")
+        self.assertEqual(end, "feature")
+
+    def test_range_two_arguments(self):
+        is_single, start, end = git2svn.parse_ref_arguments("main", "feature")
+        self.assertFalse(is_single)
+        self.assertEqual(start, "main")
+        self.assertEqual(end, "feature")
+
+    def test_empty_ref_error(self):
+        with self.assertRaises(ValueError):
+            git2svn.parse_ref_arguments(None)
+
+
 class TestParseNameStatus(unittest.TestCase):
     def test_parse_name_status_tabular(self):
         output = """
@@ -64,42 +88,37 @@ C090\tsrc/template.py\tsrc/instance.py
 
 
 class TestCliArgs(unittest.TestCase):
-    def test_cherry_pick_args(self):
-        args = git2svn.parse_cli_args(["cherry-pick", "abc1234", "--svn-dir", "/path/to/svn"])
-        self.assertEqual(args.command, "cherry-pick")
-        self.assertEqual(args.commit_hash, "abc1234")
-        self.assertEqual(args.svn_dir, Path("/path/to/svn"))
-        self.assertFalse(args.commit)
-
-    def test_cherry_pick_commit_flag(self):
-        args = git2svn.parse_cli_args(["cherry-pick", "abc1234", "--svn-dir", "/path/to/svn", "--commit"])
-        self.assertTrue(args.commit)
-
-        args_short = git2svn.parse_cli_args(["cherry-pick", "abc1234", "-s", "/path/to/svn", "-c"])
-        self.assertTrue(args_short.commit)
-
-    def test_squash_args(self):
-        args = git2svn.parse_cli_args(["--svn-dir", "/path/to/svn", "squash", "main", "feature"])
-        self.assertEqual(args.command, "squash")
-        self.assertEqual(args.start_ref, "main")
-        self.assertEqual(args.end_ref, "feature")
+    def test_stage_single_commit(self):
+        args = git2svn.parse_cli_args(["stage", "abc1234", "--svn-dir", "/path/to/svn"])
+        self.assertEqual(args.command, "stage")
+        self.assertEqual(args.ref1, "abc1234")
+        self.assertIsNone(args.ref2)
+        self.assertFalse(args.copy)
         self.assertEqual(args.svn_dir, Path("/path/to/svn"))
 
-    def test_sync_args(self):
-        args = git2svn.parse_cli_args(["sync", "main", "feature", "-s", "/path/to/svn", "-n", "-v"])
-        self.assertEqual(args.command, "sync")
-        self.assertEqual(args.base_ref, "main")
-        self.assertEqual(args.target_ref, "feature")
-        self.assertEqual(args.svn_dir, Path("/path/to/svn"))
-        self.assertTrue(args.dry_run)
-        self.assertTrue(args.verbose)
+    def test_stage_range_two_args(self):
+        args = git2svn.parse_cli_args(["stage", "main", "feature", "-s", "/path/to/svn", "--copy"])
+        self.assertEqual(args.command, "stage")
+        self.assertEqual(args.ref1, "main")
+        self.assertEqual(args.ref2, "feature")
+        self.assertTrue(args.copy)
+
+    def test_stage_range_dot_notation(self):
+        args = git2svn.parse_cli_args(["stage", "main..feature", "-s", "/path/to/svn"])
+        self.assertEqual(args.command, "stage")
+        self.assertEqual(args.ref1, "main..feature")
+        self.assertIsNone(args.ref2)
 
     def test_replay_args(self):
         args = git2svn.parse_cli_args(["replay", "main", "feature", "-s", "/path/to/svn"])
         self.assertEqual(args.command, "replay")
-        self.assertEqual(args.start_ref, "main")
-        self.assertEqual(args.end_ref, "feature")
+        self.assertEqual(args.ref1, "main")
+        self.assertEqual(args.ref2, "feature")
         self.assertIsNone(args.replay_action)
+
+        args_single = git2svn.parse_cli_args(["replay", "abc1234", "-s", "/path/to/svn"])
+        self.assertEqual(args_single.command, "replay")
+        self.assertEqual(args_single.ref1, "abc1234")
 
         args_cont = git2svn.parse_cli_args(["replay", "--continue", "-s", "/path/to/svn"])
         self.assertEqual(args_cont.command, "replay")
@@ -168,32 +187,6 @@ class TestSvnWorkspace(unittest.TestCase):
             text=True,
         )
 
-    @patch("subprocess.run")
-    def test_apply_structural_changes(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-
-        changes = [
-            git2svn.FileChange("A", "new_file.txt"),
-            git2svn.FileChange("D", "old_file.txt"),
-            git2svn.FileChange("M", "mod_file.txt"),
-            git2svn.FileChange("R", "new_name.txt", "old_name.txt"),
-        ]
-
-        self.svn.apply_structural_changes(changes)
-
-        # Expected calls:
-        # 1. rm old_file.txt (D)
-        # 2. rm old_name.txt (R)
-        # 3. add new_name.txt --parents (R)
-        # 4. add new_file.txt --parents (A)
-        # Modified produces no svn calls
-        called_cmds = [call_args[0][0] for call_args in mock_run.call_args_list]
-        self.assertIn(["svn", "rm", "old_file.txt"], called_cmds)
-        self.assertIn(["svn", "rm", "old_name.txt"], called_cmds)
-        self.assertIn(["svn", "add", "new_name.txt", "--parents"], called_cmds)
-        self.assertIn(["svn", "add", "new_file.txt", "--parents"], called_cmds)
-        self.assertNotIn(["svn", "add", "mod_file.txt", "--parents"], called_cmds)
-
 
 class TestPatcher(unittest.TestCase):
     def setUp(self):
@@ -220,7 +213,6 @@ class TestPatcher(unittest.TestCase):
         self.assertEqual(target_file.read_text(), "Hello\nAwesome\nWorld\n")
 
     def test_apply_diff_empty(self):
-        # Empty diff should not invoke patch command or raise error
         with patch("subprocess.run") as mock_run:
             self.patcher.apply_diff("")
             mock_run.assert_not_called()
@@ -249,254 +241,113 @@ class TestSynchronizer(unittest.TestCase):
         self.svn_dir.cleanup()
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_cherry_pick(self, mock_svn_cmd):
+    def test_stage_single_commit(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        # Commit 1 in Git
-        f1 = self.git_path / "hello.txt"
-        f1.write_text("v1\n")
-        subprocess.run(["git", "add", "hello.txt"], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "initial"], cwd=self.git_path, check=True)
-
-        # Initialize file in SVN workspace
-        (self.svn_path / "hello.txt").write_text("v1\n")
-
-        # Commit 2 in Git (cherry-pick target)
-        f1.write_text("v2\n")
-        f2 = self.git_path / "nested" / "new.txt"
-        f2.parent.mkdir(parents=True, exist_ok=True)
-        f2.write_text("new file\n")
+        # Base commit
+        f = self.git_path / "app.py"
+        f.write_text("v1\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "update"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.git_path, check=True)
 
-        commit_hash = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
-        ).stdout.strip()
+        (self.svn_path / "app.py").write_text("v1\n")
 
-        # Execute cherry-pick
-        self.sync_mgr.cherry_pick(commit_hash)
+        # Commit to stage
+        f.write_text("v2\n")
+        new_file = self.git_path / "sub" / "util.py"
+        new_file.parent.mkdir(parents=True, exist_ok=True)
+        new_file.write_text("util\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "feat: update"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # Check content in SVN workspace
-        self.assertEqual((self.svn_path / "hello.txt").read_text(), "v2\n")
-        self.assertEqual((self.svn_path / "nested" / "new.txt").read_text(), "new file\n")
+        # Run stage
+        self.sync_mgr.stage(commit_hash)
 
-        # Check SVN staging commands called
+        # Check content updated in SVN
+        self.assertEqual((self.svn_path / "app.py").read_text(), "v2\n")
+        self.assertEqual((self.svn_path / "sub" / "util.py").read_text(), "util\n")
+
+        # Check SVN staging commands called (no commit)
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["add", "nested/new.txt", "--parents"], called_args)
-        # Verify commit is NEVER called by default
+        self.assertIn(["add", "sub/util.py", "--parents"], called_args)
         self.assertFalse(any(cmd[0] == "commit" for cmd in called_args))
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_cherry_pick_with_commit(self, mock_svn_cmd):
-        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="Committed revision 100.\n", stderr="")
-
-        # Commit in Git with multi-line message
-        commit_msg = "feat(core): add feature X\n\nDetailed explanation of feature X."
-        f = self.git_path / "feature.txt"
-        f.write_text("feature content\n")
-        subprocess.run(["git", "add", "feature.txt"], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=self.git_path, check=True)
-
-        commit_hash = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
-        ).stdout.strip()
-
-        # Execute cherry-pick with commit_svn=True
-        self.sync_mgr.cherry_pick(commit_hash, commit_svn=True)
-
-        # Check content in SVN workspace
-        self.assertEqual((self.svn_path / "feature.txt").read_text(), "feature content\n")
-
-        # Check SVN staging and commit were called
-        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["add", "feature.txt", "--parents"], called_args)
-        self.assertIn(["commit", "-m", commit_msg], called_args)
-
-    @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_cherry_pick_root_commit(self, mock_svn_cmd):
+    def test_stage_range(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        # Commit 1 (root commit)
-        f1 = self.git_path / "root.txt"
-        f1.write_text("root content\n")
-        subprocess.run(["git", "add", "root.txt"], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "root"], cwd=self.git_path, check=True)
-
-        commit_hash = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
-        ).stdout.strip()
-
-        # Execute cherry-pick of root commit
-        self.sync_mgr.cherry_pick(commit_hash)
-
-        self.assertEqual((self.svn_path / "root.txt").read_text(), "root content\n")
-        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["add", "root.txt", "--parents"], called_args)
-
-    @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_squash(self, mock_svn_cmd):
-        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-
-        # Commit 1: base
+        # Base commit
         f = self.git_path / "code.txt"
         f.write_text("base\n")
         subprocess.run(["git", "add", "code.txt"], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
         base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # SVN has base
         (self.svn_path / "code.txt").write_text("base\n")
 
-        # Commit 2: step 1
+        # Commit 1
         f.write_text("step1\n")
         subprocess.run(["git", "add", "code.txt"], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "step1"], cwd=self.git_path, check=True)
 
-        # Commit 3: step 2
+        # Commit 2
         f.write_text("step2 finalized\n")
         subprocess.run(["git", "add", "code.txt"], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "step2"], cwd=self.git_path, check=True)
         head_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # Squash base..head
-        self.sync_mgr.squash(base_hash, head_hash)
+        # Stage range (squashed)
+        self.sync_mgr.stage(base_hash, head_hash)
 
         self.assertEqual((self.svn_path / "code.txt").read_text(), "step2 finalized\n")
+        # Ensure no commit was made
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertFalse(any(cmd[0] == "commit" for cmd in called_args))
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_sync_brute_force_copy(self, mock_svn_cmd):
+    def test_stage_copy_mode(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
         # Base commit
-        f1 = self.git_path / "binary_sim.bin"
-        f1.write_bytes(b"\x00\x01\x02")
-        del_f = self.git_path / "to_delete.txt"
-        del_f.write_text("delete me\n")
+        b = self.git_path / "binary.dat"
+        b.write_bytes(b"\x01\x02\x03")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
         base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # SVN workspace has base state
-        (self.svn_path / "binary_sim.bin").write_bytes(b"\x00\x01\x02")
-        (self.svn_path / "to_delete.txt").write_text("delete me\n")
+        (self.svn_path / "binary.dat").write_bytes(b"\x01\x02\x03")
 
-        # Target commit: modify binary, delete file, add new file
-        f1.write_bytes(b"\x00\xFF\xFE\xFD")
-        del_f.unlink()
-        f_add = self.git_path / "sub" / "added.txt"
-        f_add.parent.mkdir(parents=True, exist_ok=True)
-        f_add.write_text("added content\n")
-        subprocess.run(["git", "add", "-A"], cwd=self.git_path, check=True)
+        # Target commit
+        b.write_bytes(b"\x09\x08\x07\x06")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "target"], cwd=self.git_path, check=True)
         target_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # Sync
-        self.sync_mgr.sync(base_hash, target_hash)
+        # Stage with --copy (replaces old sync command)
+        self.sync_mgr.stage(f"{base_hash}..{target_hash}", use_copy=True)
 
-        # Verify binary file copied cleanly
-        self.assertEqual((self.svn_path / "binary_sim.bin").read_bytes(), b"\x00\xFF\xFE\xFD")
-        # Verify added file copied
-        self.assertEqual((self.svn_path / "sub" / "added.txt").read_text(), "added content\n")
-        # Verify deleted file removed
-        self.assertFalse((self.svn_path / "to_delete.txt").exists())
-
-        # Verify SVN commands
-        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["rm", "to_delete.txt"], called_args)
-        self.assertIn(["add", "sub/added.txt", "--parents"], called_args)
+        self.assertEqual((self.svn_path / "binary.dat").read_bytes(), b"\x09\x08\x07\x06")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_sync_rename(self, mock_svn_cmd):
+    def test_replay_single_commit(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        # Base commit
-        old_file = self.git_path / "legacy.txt"
-        old_file.write_text("rename me\n")
+        f = self.git_path / "single.txt"
+        f.write_text("single content\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-        base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "commit", "-m", "feat: single commit"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # SVN workspace starts with legacy.txt
-        (self.svn_path / "legacy.txt").write_text("rename me\n")
+        self.sync_mgr.replay(commit_hash)
 
-        # Git commit with rename
-        subprocess.run(["git", "mv", "legacy.txt", "modern.txt"], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "rename"], cwd=self.git_path, check=True)
-        target_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
-
-        self.sync_mgr.sync(base_hash, target_hash)
-
-        # Check file state in SVN
-        self.assertFalse((self.svn_path / "legacy.txt").exists())
-        self.assertEqual((self.svn_path / "modern.txt").read_text(), "rename me\n")
-
-        # Check SVN staging calls
+        self.assertEqual((self.svn_path / "single.txt").read_text(), "single content\n")
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["rm", "legacy.txt"], called_args)
-        self.assertIn(["add", "modern.txt", "--parents"], called_args)
+        self.assertIn(["add", "single.txt", "--parents"], called_args)
+        self.assertIn(["commit", "-m", "feat: single commit"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_cherry_pick_rename(self, mock_svn_cmd):
-        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-
-        # Base commit
-        f = self.git_path / "original.txt"
-        f.write_text("original content\n")
-        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-
-        (self.svn_path / "original.txt").write_text("original content\n")
-
-        # Rename commit
-        subprocess.run(["git", "mv", "original.txt", "renamed.txt"], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "rename commit"], cwd=self.git_path, check=True)
-        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
-
-        self.sync_mgr.cherry_pick(commit_hash)
-
-        self.assertFalse((self.svn_path / "original.txt").exists())
-        self.assertEqual((self.svn_path / "renamed.txt").read_text(), "original content\n")
-
-        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertIn(["rm", "original.txt"], called_args)
-        self.assertIn(["add", "renamed.txt", "--parents"], called_args)
-
-    def test_dry_run(self):
-        f = self.git_path / "draft.txt"
-        f.write_text("draft\n")
-        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "draft"], cwd=self.git_path, check=True)
-        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
-
-        dry_svn = git2svn.SvnWorkspace(self.svn_path, dry_run=True)
-        dry_patcher = git2svn.Patcher(self.svn_path, dry_run=True)
-        dry_sync = git2svn.Synchronizer(self.git_repo, dry_svn, dry_patcher, dry_run=True)
-
-        dry_sync.cherry_pick(commit_hash)
-
-        # File should NOT be created in SVN workspace because dry_run=True
-        self.assertFalse((self.svn_path / "draft.txt").exists())
-
-    @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_main_cli(self, mock_svn_cmd):
-        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-
-        f = self.git_path / "cli_test.txt"
-        f.write_text("cli test\n")
-        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "cli test"], cwd=self.git_path, check=True)
-        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
-
-        code = git2svn.main([
-            "--git-dir", str(self.git_path),
-            "--svn-dir", str(self.svn_path),
-            "cherry-pick", commit_hash,
-        ])
-        self.assertEqual(code, 0)
-        self.assertEqual((self.svn_path / "cli_test.txt").read_text(), "cli test\n")
-
-    @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_replay_clean_series(self, mock_svn_cmd):
+    def test_replay_range(self, mock_svn_cmd):
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
         # Base commit
@@ -521,26 +372,10 @@ class TestSynchronizer(unittest.TestCase):
 
         self.sync_mgr.replay(base_hash, target_hash)
 
-        # Check final content in SVN
         self.assertEqual((self.svn_path / "file.txt").read_text(), "v2\n")
-
-        # Check commit commands were called with their respective messages
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
         self.assertIn(["commit", "-m", "commit 1"], called_args)
         self.assertIn(["commit", "-m", "commit 2"], called_args)
-
-    def test_replay_dirty_workspace_error(self):
-        with patch.object(git2svn.SvnWorkspace, "is_clean", return_value=False):
-            with self.assertRaises(RuntimeError) as ctx:
-                self.sync_mgr.replay("HEAD~1", "HEAD")
-            self.assertIn("uncommitted changes", str(ctx.exception))
-
-    def test_replay_merges_error(self):
-        with patch.object(git2svn.SvnWorkspace, "is_clean", return_value=True):
-            with patch.object(git2svn.GitRepo, "get_merge_commits", return_value=["mergehash123"]):
-                with self.assertRaises(RuntimeError) as ctx:
-                    self.sync_mgr.replay("HEAD~1", "HEAD")
-                self.assertIn("merge commit", str(ctx.exception))
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_replay_conflict_pause_and_continue(self, mock_svn_cmd):
@@ -553,10 +388,9 @@ class TestSynchronizer(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
         base_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
 
-        # SVN workspace starts with divergent line
         (self.svn_path / "conflict_test.txt").write_text("line DIFFERENT\nline B\n")
 
-        # Git commit 1 (changes line A, which will conflict with line DIFFERENT)
+        # Git commit 1 (conflicts with SVN)
         f.write_text("line A MODIFIED\nline B\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "commit with conflict"], cwd=self.git_path, check=True)
@@ -573,44 +407,20 @@ class TestSynchronizer(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.sync_mgr.replay(base_hash, c2_hash)
 
-        # State file should exist in .svn/git2svn-replay.json
+        # State file exists
         state = git2svn.load_replay_state(self.svn_path)
         self.assertIsNotNone(state)
         self.assertEqual(state["current_commit"], c1_hash)
-        self.assertEqual(state["remaining_commits"], [c2_hash])
 
-        # Clean up any .rej file before continue
+        # Clean artifacts, resolve conflict in SVN, and continue
         git2svn.clean_conflict_artifacts(self.svn_path)
         (self.svn_path / "conflict_test.txt").write_text("line A MODIFIED\nline B\n")
 
-        # Now continue replay
         self.sync_mgr.replay_continue()
 
-        # Check final content of both files in SVN
         self.assertEqual((self.svn_path / "conflict_test.txt").read_text(), "line A MODIFIED\nline B\n")
         self.assertEqual((self.svn_path / "next_file.txt").read_text(), "next\n")
-
-        # State file should now be cleared
         self.assertIsNone(git2svn.load_replay_state(self.svn_path))
-
-    def test_replay_continue_rejects_leftover_artifacts(self):
-        state_data = {
-            "current_commit": "abc",
-            "current_commit_msg": "test",
-            "remaining_commits": [],
-        }
-        git2svn.save_replay_state(self.svn_path, state_data)
-
-        # Create leftover .rej file
-        rej_file = self.svn_path / "file.txt.rej"
-        rej_file.write_text("hunk failed")
-
-        with self.assertRaises(RuntimeError) as ctx:
-            self.sync_mgr.replay_continue()
-        self.assertIn("rejected patch artifacts", str(ctx.exception))
-
-        rej_file.unlink()
-        git2svn.clear_replay_state(self.svn_path)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_replay_abort(self, mock_svn_cmd):
@@ -631,6 +441,24 @@ class TestSynchronizer(unittest.TestCase):
         self.assertFalse(rej.exists())
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
         self.assertIn(["revert", "-R", "."], called_args)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_main_cli(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        f = self.git_path / "cli_test.txt"
+        f.write_text("cli test\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "cli test"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        code = git2svn.main([
+            "--git-dir", str(self.git_path),
+            "--svn-dir", str(self.svn_path),
+            "stage", commit_hash,
+        ])
+        self.assertEqual(code, 0)
+        self.assertEqual((self.svn_path / "cli_test.txt").read_text(), "cli test\n")
 
 
 if __name__ == "__main__":
