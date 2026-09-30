@@ -115,6 +115,12 @@ Prepares changes in the SVN workspace **without committing**, ready for review i
   # Extract files directly from Git object DB (ideal for binaries, images, or large refactors)
   ./git2svn.py stage master..feature/assets --copy --svn-dir /path/to/svn
   ```
+* **Full Tree Alignment (`--snapshot`):**
+  Mirrors the exact state of a Git branch or commit onto SVN without needing to know where it branched off from. Compares the Git tree against the SVN workspace to detect and stage all additions, deletions, and modifications:
+  ```bash
+  # Align SVN workspace to match feature/login exactly
+  ./git2svn.py stage feature/login --snapshot --svn-dir /path/to/svn
+  ```
 
 ---
 

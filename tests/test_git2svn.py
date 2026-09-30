@@ -529,6 +529,48 @@ class TestSynchronizer(unittest.TestCase):
         content = svn_file.read_bytes()
         self.assertEqual(content, b"line 1\r\nline 2 updated\r\nline 3\r\n")
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_stage_snapshot(self, mock_svn_cmd):
+        """
+        Verify stage --snapshot accurately aligns the SVN workspace to Git state:
+        - Removes files present in SVN but missing in Git
+        - Adds files present in Git but missing in SVN
+        - Modifies existing files to match Git content
+        """
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # 1. SVN workspace currently has:
+        # - keep_and_modify.txt
+        # - to_delete.txt
+        (self.svn_path / "keep_and_modify.txt").write_bytes(b"svn old content\r\n")
+        (self.svn_path / "to_delete.txt").write_bytes(b"delete me\r\n")
+
+        # 2. Git repo at target_ref has:
+        # - keep_and_modify.txt (modified)
+        # - brand_new.txt (added)
+        # (and does NOT have to_delete.txt)
+        (self.git_path / "keep_and_modify.txt").write_bytes(b"git new content\n")
+        (self.git_path / "brand_new.txt").write_bytes(b"new file content\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "target snapshot commit"], cwd=self.git_path, check=True)
+        target_ref = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True).stdout.strip()
+
+        # Run stage --snapshot
+        self.sync_mgr.stage(target_ref, snapshot=True)
+
+        # Assertions on disk:
+        # - to_delete.txt removed
+        self.assertFalse((self.svn_path / "to_delete.txt").exists())
+        # - keep_and_modify.txt updated (and EOL preserved as CRLF because original was CRLF)
+        self.assertEqual((self.svn_path / "keep_and_modify.txt").read_bytes(), b"git new content\r\n")
+        # - brand_new.txt created
+        self.assertEqual((self.svn_path / "brand_new.txt").read_bytes(), b"new file content\n")
+
+        # SVN structural commands invoked:
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertIn(["rm", "to_delete.txt"], called_args)
+        self.assertIn(["add", "brand_new.txt", "--parents"], called_args)
+
 
 class TestEolUtilities(unittest.TestCase):
     def setUp(self):

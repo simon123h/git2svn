@@ -368,6 +368,18 @@ class GitRepo:
         res = self.run_cmd(["rev-list", "--merges", f"{start_ref}..{end_ref}"])
         return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
+    def get_tree_files(self, ref: str) -> List[Path]:
+        """Return list of all relative file paths at revision ref (from git ls-tree -r -z)."""
+        res = self.run_cmd_bytes(["ls-tree", "-r", "-z", "--name-only", ref])
+        raw_paths = res.stdout.split(b"\0")
+        files: List[Path] = []
+        for raw in raw_paths:
+            if not raw:
+                continue
+            path_str = raw.decode("utf-8", errors="replace")
+            files.append(Path(path_str))
+        return files
+
 
 class SvnWorkspace:
     """Wrapper around SVN commands and filesystem staging operations."""
@@ -419,6 +431,53 @@ class SvnWorkspace:
         """Check if SVN workspace has no uncommitted changes."""
         res = self.run_cmd(["status", "-q"], check=False)
         return not bool(res.stdout.strip())
+
+    def get_versioned_files(self) -> List[Path]:
+        """
+        Return list of all versioned file paths in the SVN workspace (relative to workspace_dir).
+        Queries 'svn status -v -q --depth infinity' (ignores unversioned files and directories).
+        Falls back to filesystem scan (excluding .svn) if svn command fails or workspace is empty.
+        """
+        files: List[Path] = []
+        res = self.run_cmd(["status", "-v", "-q", "--depth", "infinity"], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            for line in res.stdout.splitlines():
+                # Format: 7 or 8 status columns followed by path
+                # e.g. "             1234      1234 author       path/to/file"
+                # svn status lines have at least 8 or 9 fixed character status flags
+                # but path is always the remainder after whitespace split or column slicing
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                # The file path is the last element
+                target_str = parts[-1]
+                target_path = Path(target_str)
+                # target_str could be absolute or relative to workspace_dir
+                if target_path.is_absolute():
+                    try:
+                        rel = target_path.relative_to(self.workspace_dir)
+                    except ValueError:
+                        continue
+                else:
+                    rel = target_path
+
+                full_path = self.workspace_dir / rel
+                # Only include actual files (exclude the workspace root "." or directories)
+                if str(rel) != "." and (full_path.is_file() or full_path.is_symlink() or not full_path.exists()):
+                    files.append(rel)
+            return files
+
+        # Filesystem fallback if not in a working copy or status was empty
+        for root, dirs, f_list in os.walk(self.workspace_dir):
+            if ".svn" in dirs:
+                dirs.remove(".svn")
+            for f in f_list:
+                full = Path(root) / f
+                try:
+                    files.append(full.relative_to(self.workspace_dir))
+                except ValueError:
+                    pass
+        return files
 
     def revert_all(self) -> None:
         """Revert all uncommitted changes in the workspace."""
@@ -570,11 +629,22 @@ class Synchronizer:
         )
         print(banner)
 
-    def stage(self, ref1: str, ref2: Optional[str] = None, use_copy: bool = False) -> None:
+    def stage(
+        self,
+        ref1: str,
+        ref2: Optional[str] = None,
+        use_copy: bool = False,
+        snapshot: bool = False,
+    ) -> None:
         """
         Stage changes from a commit or range in SVN workspace without committing.
-        If use_copy=True, brute-force copies files using shutil (bypassing patch).
+        If snapshot=True, aligns the SVN workspace to match ref1 exactly (bypassing history).
+        If use_copy=True, brute-force copies files using Git object DB (bypassing patch).
         """
+        if snapshot:
+            self.stage_snapshot(ref1)
+            return
+
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
         target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
         self.show_identity_banner(target_spec)
@@ -597,6 +667,113 @@ class Synchronizer:
             else:
                 self._patch_and_stage_range(start_ref, end_ref)
         logger.info("Changes staged successfully in SVN workspace (uncommitted).")
+
+    def stage_snapshot(self, target_ref: str) -> None:
+        """
+        Mirror the exact tree state of target_ref onto the SVN workspace without committing.
+        Detects added, deleted, and modified files by comparing the Git tree against SVN files.
+        """
+        self.show_identity_banner(f"{target_ref} (snapshot)")
+        logger.info("Starting snapshot synchronization to Git ref '%s'...", target_ref)
+
+        git_files_list = self.git.get_tree_files(target_ref)
+        git_files_set = set(git_files_list)
+        svn_files_list = self.svn.get_versioned_files()
+        svn_files_set = set(svn_files_list)
+
+        deleted_files = sorted(svn_files_set - git_files_set)
+        added_files = sorted(git_files_set - svn_files_set)
+        common_files = sorted(git_files_set & svn_files_set)
+
+        logger.info("Snapshot delta: %d added, %d deleted, %d existing files to compare",
+                    len(added_files), len(deleted_files), len(common_files))
+
+        # 1. Handle deleted files: remove from SVN and disk
+        for rel_path in deleted_files:
+            logger.info("SVN staging snapshot delete: %s", rel_path)
+            self.svn.stage_rm(rel_path)
+            full_path = self.svn.workspace_dir / rel_path
+            if not self.dry_run and full_path.exists():
+                if full_path.is_dir():
+                    shutil.rmtree(full_path)
+                else:
+                    full_path.unlink()
+
+        # 2. Handle modified files: compare content and write if changed
+        modified_count = 0
+        for rel_path in common_files:
+            dst_path = self.svn.workspace_dir / rel_path
+            mode = self.git.get_file_mode(target_ref, rel_path)
+            content = self.git.get_file_content_bytes(target_ref, rel_path)
+
+            if mode == "120000":
+                # Symlink
+                link_target = content.decode("utf-8", errors="replace").strip()
+                needs_update = True
+                if dst_path.is_symlink() and os.readlink(dst_path) == link_target:
+                    needs_update = False
+
+                if needs_update:
+                    modified_count += 1
+                    if self.dry_run:
+                        print(f"[DRY-RUN] Update symlink {rel_path} -> {link_target}")
+                    else:
+                        dst_path.unlink(missing_ok=True)
+                        os.symlink(link_target, dst_path)
+            else:
+                # Regular file: check existing newline style & compare bytes
+                orig_eol = detect_file_eol(dst_path) if dst_path.exists() else None
+                # Normalize new content in memory to match orig_eol before comparing
+                target_bytes = content
+                if orig_eol:
+                    # Quick memory normalization to target EOL for fair byte comparison
+                    unified = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                    if orig_eol == b"\r\n":
+                        target_bytes = unified.replace(b"\n", b"\r\n")
+                    else:
+                        target_bytes = unified
+
+                current_bytes = dst_path.read_bytes() if dst_path.exists() and dst_path.is_file() else None
+                if current_bytes != target_bytes:
+                    modified_count += 1
+                    if self.dry_run:
+                        print(f"[DRY-RUN] Update file content: {rel_path}")
+                    else:
+                        dst_path.parent.mkdir(parents=True, exist_ok=True)
+                        if dst_path.exists() or dst_path.is_symlink():
+                            dst_path.unlink()
+                        dst_path.write_bytes(target_bytes)
+
+        # 3. Handle added files: extract from Git and run svn add
+        for rel_path in added_files:
+            logger.info("SVN staging snapshot add: %s", rel_path)
+            dst_path = self.svn.workspace_dir / rel_path
+            mode = self.git.get_file_mode(target_ref, rel_path)
+            content = self.git.get_file_content_bytes(target_ref, rel_path)
+
+            if self.dry_run:
+                print(f"[DRY-RUN] Extract new file {rel_path} and stage add")
+            else:
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                if dst_path.exists() or dst_path.is_symlink():
+                    dst_path.unlink()
+
+                if mode == "120000":
+                    link_target = content.decode("utf-8", errors="replace").strip()
+                    os.symlink(link_target, dst_path)
+                else:
+                    dst_path.write_bytes(content)
+                    # Normalize newly added file to default EOL if needed
+                    normalize_file_eol(dst_path)
+
+                self.svn.stage_add(rel_path)
+
+        logger.info(
+            "Snapshot staging completed: %d added, %d deleted, %d modified (uncommitted).",
+            len(added_files),
+            len(deleted_files),
+            modified_count,
+        )
 
     def replay(self, ref1: str, ref2: Optional[str] = None) -> None:
         """
@@ -947,13 +1124,19 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common_parser],
         help="Stage changes in SVN workspace without committing (for review)",
     )
-    parser_stage.add_argument("ref1", help="Commit hash or start ref (e.g. 'abc1234' or 'main..feature' or 'main')")
+    parser_stage.add_argument("ref1", help="Commit hash, branch, or start ref (e.g. 'abc1234' or 'main..feature' or 'main')")
     parser_stage.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
     parser_stage.add_argument(
         "--copy",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="Brute-force copy modified/added files using shutil (bypasses patch; ideal for binaries/conflicts)",
+        help="Brute-force copy modified/added files using Git object DB (bypasses patch; ideal for binaries/conflicts)",
+    )
+    parser_stage.add_argument(
+        "--snapshot",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Mirror the exact tree of ref1 onto SVN without knowing base ref (adds new, removes missing, updates modified)",
     )
 
     # replay
@@ -1001,6 +1184,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         dry_run=False,
         verbose=False,
         copy=False,
+        snapshot=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -1047,7 +1231,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         if args.command == "stage":
-            sync_mgr.stage(args.ref1, args.ref2, use_copy=getattr(args, "copy", False))
+            sync_mgr.stage(
+                args.ref1,
+                args.ref2,
+                use_copy=getattr(args, "copy", False),
+                snapshot=getattr(args, "snapshot", False),
+            )
         elif args.command == "replay":
             action = getattr(args, "replay_action", None)
             if action == "continue":
