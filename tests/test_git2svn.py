@@ -539,6 +539,63 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual((self.svn_path / "cfg_test.txt").read_text(), "config test\n")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_with_update_flag(self, mock_svn_cmd):
+        """Verify git2svn replay --update invokes svn update on completion."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        f = self.git_path / "update_test.txt"
+        f.write_text("update test\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "update test"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "--svn-dir",
+                str(self.svn_path),
+                "replay",
+                "-u",
+                commit_hash,
+            ]
+        )
+        self.assertEqual(code, 0)
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertIn(["update"], called_args)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_with_git_config_auto_update(self, mock_svn_cmd):
+        """Verify git config git2svn.autoUpdate invokes svn update on replay without CLI -u."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        subprocess.run(["git", "config", "git2svn.autoUpdate", "true"], cwd=self.git_path, check=True)
+
+        f = self.git_path / "auto_update_test.txt"
+        f.write_text("auto update test\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "auto update test"], cwd=self.git_path, check=True)
+        commit_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        code = git2svn.main(
+            [
+                "--git-dir",
+                str(self.git_path),
+                "--svn-dir",
+                str(self.svn_path),
+                "replay",
+                commit_hash,
+            ]
+        )
+        self.assertEqual(code, 0)
+        called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
+        self.assertIn(["update"], called_args)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_eol_preservation_on_crlf_target(self, mock_svn_cmd):
         """Verify git apply with an LF patch preserves CRLF line endings on CRLF target file."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")

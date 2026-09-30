@@ -31,11 +31,13 @@ class Synchronizer:
         svn_workspace: SvnWorkspace,
         patcher: Patcher,
         dry_run: bool = False,
+        auto_update: bool = False,
     ):
         self.git = git_repo
         self.svn = svn_workspace
         self.patcher = patcher
         self.dry_run = dry_run
+        self.auto_update = auto_update
 
     def show_identity_banner(self, target_ref_spec: str) -> None:
         """Display identity banner showing active Git and SVN target branches/URLs."""
@@ -276,6 +278,8 @@ class Synchronizer:
         else:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay completed successfully! All %d commits applied.", total)
+            if self.auto_update:
+                self.svn.update()
 
     def replay_abort(self) -> None:
         """Abort in-progress replay and revert uncommitted changes."""
@@ -357,6 +361,8 @@ class Synchronizer:
                 raise
         clear_replay_state(self.svn.workspace_dir)
         logger.info("Replay completed successfully! All %d commits applied.", total_commits)
+        if self.auto_update:
+            self.svn.update()
 
     def _patch_and_stage_commit(self, commit_hash: str) -> None:
         """Extract diff for a single commit, apply using git apply, and stage in SVN."""

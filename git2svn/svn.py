@@ -209,3 +209,17 @@ class SvnWorkspace:
                 self.stage_add(change.path)
             elif change.is_modified:
                 logger.debug("Modified file requires no SVN structural command: %s", change.path)
+
+    def update(self) -> None:
+        """Run svn update on the working copy to bump the working base revision to HEAD."""
+        if self.dry_run:
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} update")
+            return
+
+        logger.info("Executing svn update in %s...", self.workspace_dir)
+        res = self.run_cmd(["update"], check=False)
+        if res.returncode != 0:
+            logger.error("Failed to 'svn update': %s", res.stderr.strip())
+            raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "update"], res.stdout, res.stderr)
+        if res.stdout:
+            logger.info("SVN update output:\n%s", res.stdout.strip())

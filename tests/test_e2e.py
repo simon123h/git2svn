@@ -171,6 +171,39 @@ class TestGit2SvnE2E(unittest.TestCase):
         self.assertTrue(svn_calc.is_file())
         self.assertEqual(svn_calc.read_text(encoding="utf-8"), "def add(a, b):\n    return a + b\n")
 
+    def test_e2e_replay_with_update_flag(self):
+        """Test replay with --update updates the working copy base revision to HEAD."""
+        base_file = self.git_dir / "initial.txt"
+        base_file.write_text("v1\n", encoding="utf-8")
+        base_hash = self._git_commit("initial file")
+
+        # Setup initial commit in SVN
+        (self.svn_wc_dir / "initial.txt").write_text("v1\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "add", "initial.txt"], cwd=self.svn_wc_dir, check=True, capture_output=True)
+        subprocess.run([SVN_BIN, "commit", "-m", "initial setup"], cwd=self.svn_wc_dir, check=True, capture_output=True)
+
+        # Commit 2 in Git
+        base_file.write_text("v2\n", encoding="utf-8")
+        target_hash = self._git_commit("bump to v2")
+
+        # Run replay with -u / --update
+        exit_code = cli_main(
+            ["replay", "-u", f"{base_hash}..{target_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+        )
+        self.assertEqual(exit_code, 0)
+
+        # Running plain 'svn log' without revision arguments should now show the new revision (r2)
+        # because the working copy base revision was updated to HEAD.
+        plain_log = subprocess.run(
+            [SVN_BIN, "log"],
+            cwd=self.svn_wc_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout
+        self.assertIn("bump to v2", plain_log)
+
     def test_e2e_snapshot_sync(self):
         """Test snapshot synchronization between divergent Git tree and SVN workspace."""
         # Create base file in SVN

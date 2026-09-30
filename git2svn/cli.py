@@ -112,6 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_replay.add_argument("ref1", nargs="?", default=None, help="Commit hash or start ref")
     parser_replay.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
+    parser_replay.add_argument(
+        "-u",
+        "--update",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Run 'svn update' upon successful replay completion to bump working copy to HEAD",
+    )
     action_group = parser_replay.add_mutually_exclusive_group()
     action_group.add_argument(
         "--continue",
@@ -151,6 +158,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         copy=False,
         snapshot=False,
         replay_action=None,
+        update=False,
     )
     return parser.parse_args(argv, namespace=namespace)
 
@@ -207,13 +215,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         if config_copy is not None:
             use_copy = config_copy
 
+    auto_update = getattr(args, "update", False)
+    if not auto_update:
+        config_update = git_repo.get_config_bool("git2svn.autoUpdate")
+        if config_update is not None:
+            auto_update = config_update
+
     svn_workspace = SvnWorkspace(svn_dir, dry_run=dry_run)
     if not svn_workspace.is_valid_workspace() and not dry_run:
         print(f"Error: '{svn_dir}' does not appear to be an SVN working copy (no .svn found).", file=sys.stderr)
         return 1
 
     patcher = Patcher(svn_dir, dry_run=dry_run)
-    sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=dry_run)
+    sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=dry_run, auto_update=auto_update)
 
     try:
         if args.command == "stage":

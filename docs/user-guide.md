@@ -19,6 +19,7 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 | `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
 | `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
 | `--copy` | — | — | `git2svn.copy` | `False` | Extract exact binary snapshots directly from Git object DB. |
+| `--update` | `-u` | — | `git2svn.autoUpdate` | `False` | Run `svn update` after `replay` to bump local base revision to `HEAD`. |
 
 ### 1.1 Persisting Settings via `git config`
 
@@ -98,6 +99,19 @@ git2svn replay a1b2c3d4 -s /path/to/svn
 Replay each commit in the range sequentially into SVN history:
 ```bash
 git2svn replay main..feature/login -s /path/to/svn
+```
+
+### 3.3 Updating Working Copy Base Revision (`--update` / `-u`)
+Subversion working copies operate with **mixed revisions**: when `git2svn replay` commits revisions to the SVN repository, only touched files are updated locally while the working copy base revision remains pegged at the previous revision (meaning `svn log` won't show new commits without `svn update`).
+
+Use `-u` or `--update` to automatically run `svn update` upon successful replay completion:
+```bash
+git2svn replay -u main..feature/login -s /path/to/svn
+```
+
+You can also enable this permanently for your repository in `.git/config`:
+```bash
+git config git2svn.autoUpdate true
 ```
 
 ---
