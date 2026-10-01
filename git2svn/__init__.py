@@ -6,7 +6,7 @@ to a local Subversion (SVN) working copy.
 from __future__ import annotations
 
 from .cli import build_parser, main, parse_cli_args
-from .colors import TerminalColor
+from .colors import ColoredLogFormatter, TerminalColor
 from .core import Synchronizer
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
@@ -47,6 +47,7 @@ __all__ = [
     "SvnOutOfDateError",
     "Patcher",
     "TerminalColor",
+    "ColoredLogFormatter",
     "StatusReporter",
     "run_setup",
     "FileChange",

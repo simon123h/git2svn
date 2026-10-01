@@ -52,9 +52,10 @@ class Synchronizer:
         svn_rev = svn_info.get("Revision")
         svn_suffix = f" (r{svn_rev})" if svn_rev else ""
 
+        target_badge = self.color.target_badge("[TARGET]")
         banner = (
-            f"[TARGET] Git source : {self.git.repo_dir.name} [{branch} @ {head}] -> ref: {target_ref_spec}\n"
-            f"[TARGET] SVN target : {self.svn.workspace_dir.name} [{svn_target}{svn_suffix}]"
+            f"{target_badge} Git source : {self.git.repo_dir.name} [{branch} @ {head}] -> ref: {target_ref_spec}\n"
+            f"{target_badge} SVN target : {self.svn.workspace_dir.name} [{svn_target}{svn_suffix}]"
         )
         print(banner)
 
@@ -384,8 +385,9 @@ class Synchronizer:
                     rej_rel = [str(r.relative_to(self.svn.workspace_dir)) for r in rej_files]
                     rej_info = "\nConflicts detected in:\n" + "\n".join(f"  - {f}" for f in rej_rel)
 
+                paused_badge = self.color.paused_badge("[PAUSED]")
                 print(
-                    f'\n[PAUSED] Conflict while applying commit {commit_hash[:8]} ({idx}/{total_commits}): "{first_line}"'
+                    f'\n{paused_badge} Conflict while applying commit {commit_hash[:8]} ({idx}/{total_commits}): "{first_line}"'
                     f"{rej_info}\n\n"
                     f"To resolve:\n"
                     f"  1. Resolve conflicts in '{self.svn.workspace_dir}' and stage changes ('svn add' / 'svn rm').\n"

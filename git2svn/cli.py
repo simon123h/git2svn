@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .colors import ColoredLogFormatter, TerminalColor
 from .core import Synchronizer
 from .git import GitRepo
 from .patcher import Patcher
@@ -257,9 +258,6 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_cli_args(argv)
 
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="[%(levelname)s] %(message)s")
-
     git_dir = args.git_dir
     if not git_dir and args.command == "replay" and getattr(args, "replay_action", None):
         cwd = Path.cwd()
@@ -269,6 +267,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     git_dir = git_dir or find_default_git_dir()
     git_repo = GitRepo(git_dir)
+
+    # Color mode: CLI --color -> git config git2svn.color -> "auto"
+    color_mode = getattr(args, "color", None)
+    if not color_mode:
+        config_color = git_repo.get_config("git2svn.color") if git_repo.is_valid_repo() else None
+        color_mode = config_color if config_color in ("auto", "always", "never") else "auto"
+
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    handler = logging.StreamHandler()
+    handler.setFormatter(ColoredLogFormatter(TerminalColor(color_mode)))
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    root_logger.handlers = [handler]
+
     if not git_repo.is_valid_repo():
         print(f"Error: '{git_dir}' is not a valid Git repository.", file=sys.stderr)
         return 1
@@ -323,12 +335,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not svn_workspace.is_valid_workspace() and not dry_run:
         print(f"Error: '{svn_dir}' does not appear to be an SVN working copy (no .svn found).", file=sys.stderr)
         return 1
-
-    # Color mode: CLI --color -> git config git2svn.color -> "auto"
-    color_mode = getattr(args, "color", None)
-    if not color_mode:
-        config_color = git_repo.get_config("git2svn.color")
-        color_mode = config_color if config_color in ("auto", "always", "never") else "auto"
 
     patcher = Patcher(svn_dir, dry_run=dry_run)
     sync_mgr = Synchronizer(

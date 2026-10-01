@@ -59,6 +59,54 @@ class TestTerminalColor(unittest.TestCase):
         finally:
             temp_dir.cleanup()
 
+    def test_badges(self):
+        color_always = git2svn.TerminalColor(mode="always")
+        self.assertIn("\033[", color_always.info_badge())
+        self.assertIn("\033[", color_always.target_badge())
+        self.assertIn("\033[", color_always.warn_badge())
+        self.assertIn("\033[", color_always.error_badge())
+        self.assertIn("\033[", color_always.paused_badge())
+
+        color_never = git2svn.TerminalColor(mode="never")
+        self.assertEqual(color_never.info_badge(), "[INFO]")
+        self.assertEqual(color_never.target_badge(), "[TARGET]")
+        self.assertEqual(color_never.warn_badge(), "[WARN]")
+        self.assertEqual(color_never.error_badge(), "[ERROR]")
+        self.assertEqual(color_never.paused_badge(), "[PAUSED]")
+
+    def test_colored_log_formatter(self):
+        import logging
+
+        record_info = logging.LogRecord("test", logging.INFO, "test.py", 10, "info message", (), None)
+        record_warn = logging.LogRecord("test", logging.WARNING, "test.py", 10, "warn message", (), None)
+        record_err = logging.LogRecord("test", logging.ERROR, "test.py", 10, "err message", (), None)
+        record_debug = logging.LogRecord("test", logging.DEBUG, "test.py", 10, "debug message", (), None)
+
+        # Mode: always
+        fmt_always = git2svn.ColoredLogFormatter(git2svn.TerminalColor(mode="always"))
+        out_info = fmt_always.format(record_info)
+        self.assertIn("\033[", out_info)
+        self.assertIn("info message", out_info)
+
+        out_warn = fmt_always.format(record_warn)
+        self.assertIn("\033[", out_warn)
+        self.assertIn("warn message", out_warn)
+
+        out_err = fmt_always.format(record_err)
+        self.assertIn("\033[", out_err)
+        self.assertIn("err message", out_err)
+
+        out_debug = fmt_always.format(record_debug)
+        self.assertIn("\033[", out_debug)
+        self.assertIn("debug message", out_debug)
+
+        # Mode: never
+        fmt_never = git2svn.ColoredLogFormatter(git2svn.TerminalColor(mode="never"))
+        self.assertEqual(fmt_never.format(record_info), "[INFO] info message")
+        self.assertEqual(fmt_never.format(record_warn), "[WARNING] warn message")
+        self.assertEqual(fmt_never.format(record_err), "[ERROR] err message")
+        self.assertEqual(fmt_never.format(record_debug), "[DEBUG] debug message")
+
 
 if __name__ == "__main__":
     unittest.main()
