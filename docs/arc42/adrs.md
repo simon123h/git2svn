@@ -130,5 +130,19 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - Delivers clear, actionable developer guidance at the exact moment of error.
   - Zero external dependencies: pure POSIX shell hook executed by Git itself.
 
+---
+
+### ADR-15: Delta-Based Patching vs. Whole-Tree Mirroring
+* **Context:** In active multi-developer teams, colleagues frequently commit changes directly to the central Subversion repository. In typical setups where a background service or script (`svn2git`) mirrors SVN commits back into Git, there is often a latency gap: the local Git repository does not yet know about the newest SVN commits. A naive architectural redesign might attempt to simplify `git2svn` by eliminating unified diff patching (`git apply`) in favor of whole-tree snapshot mirroring (e.g. wiping/overwriting the SVN working copy with Git's file tree via `git archive` or snapshot sync).
+* **Decision:** Strictly retain **delta-based patch application** (`git diff | git apply`) on top of an updated SVN working copy (`svn update`) for standard replay operations.
+  1. Whole-tree snapshotting is strictly relegated to explicit manual realignments via `stage --snapshot`.
+  2. Sequential commit replay extracts only the discrete diff between parent and child Git commits.
+  3. The diff is applied against the working copy containing the latest SVN HEAD.
+  4. Non-overlapping colleague edits are automatically preserved by Subversion's 3-way merge capabilities; overlapping edits trigger standard patch/merge conflict resolution rather than silent data overwrites.
+* **Consequences:**
+  - **Zero Silent Data Loss:** Changes committed by teammates to SVN that have not yet been reflected in Git are never deleted or clobbered.
+  - **Architectural Justification for the SVN Working Copy:** Confirms why a local SVN working copy is indispensable over direct server-side transaction tools (e.g. `svnmucc`), as a local working copy is required to compute 3-way merges and surface interactive conflict markers.
+  - **Accepts Patch Complexity:** Acknowledges the necessity of EOL normalization, reject handling, and whitespace tolerance as essential trade-offs to guarantee non-destructive concurrent synchronization.
+
 
 

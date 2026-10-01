@@ -14,6 +14,7 @@ This document describes the software architecture of `git2svn` using the [arc42]
 2. **Predictable Commit Boundary:** Clear distinction between uncommitted staging (`stage`) and automatic sequential commits (`replay`).
 3. **Format Robustness:** Transparent line-ending (`CRLF`/`LF`) normalization, resolving Subversion's strict `E135000: Inconsistent line ending style` constraint.
 4. **Stateful Conflict Recovery:** Atomic commit pause/resume lifecycle during multi-commit replays.
+5. **Non-Destructive Concurrent Replay:** Preserve un-mirrored colleague commits in SVN by applying granular delta patches against an updated working copy rather than performing destructive full-tree overwrites.
 
 ### 1.3 Stakeholders
 * **Git Developers:** Local development, branching, and rebasing.
@@ -66,6 +67,7 @@ flowchart TD
    * `replay`: Always commits each Git commit with its original message. Enforces linear history and provides stateful conflict pause/continue/abort/skip.
 2. **Patcher Engine:** Replaced GNU `patch` with `git apply --ignore-whitespace --unsafe-paths --reject` to eliminate Windows prerequisites and natively parse Git diff extensions.
 3. **Smart EOL Normalization:** Pre-inspects original file newline style, applies diffs, and normalizes all touched files back to their target line-ending style (`\r\n` or `\n`), skipping binaries and symlinks.
+4. **Delta-Based Patching over Snapshot Overwriting:** Replay operations apply localized git diffs onto an updated SVN working copy (`svn update`). This guarantees that concurrent commits pushed by teammates directly to Subversion are never clobbered or deleted, leveraging Subversion's 3-way merge engine to detect genuine collisions.
 
 ---
 
