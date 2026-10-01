@@ -218,6 +218,11 @@ class Synchronizer:
         target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
         self.show_identity_banner(target_spec)
 
+        if not self.dry_run and not self.svn.is_clean():
+            raise RuntimeError(
+                "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
+            )
+
         if is_single:
             commit_hash = start_or_commit
             logger.info("Replaying single commit %s", commit_hash)
@@ -225,11 +230,6 @@ class Synchronizer:
         else:
             start_ref = start_or_commit
             assert end_ref is not None
-
-            if not self.dry_run and not self.svn.is_clean():
-                raise RuntimeError(
-                    "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
-                )
 
             merges = self.git.get_merge_commits(start_ref, end_ref)
             if merges:

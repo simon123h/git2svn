@@ -677,6 +677,20 @@ class TestSynchronizer(unittest.TestCase):
             self.assertEqual(res, 1)
             mock_tb.assert_called_once()
 
+    def test_replay_raises_if_svn_workspace_dirty(self):
+        """Verify replay raises RuntimeError if SVN workspace has uncommitted changes."""
+        with patch.object(self.svn_ws, "is_clean", return_value=False):
+            with self.assertRaises(RuntimeError) as cm:
+                self.sync_mgr.replay("HEAD~1..HEAD")
+            self.assertIn("SVN workspace has uncommitted changes", str(cm.exception))
+
+    def test_replay_single_commit_raises_if_dirty(self):
+        """Verify replay of single commit raises RuntimeError if SVN workspace has uncommitted changes."""
+        with patch.object(self.svn_ws, "is_clean", return_value=False):
+            with self.assertRaises(RuntimeError) as cm:
+                self.sync_mgr.replay("HEAD")
+            self.assertIn("SVN workspace has uncommitted changes", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
