@@ -32,6 +32,63 @@ def find_svn_binary() -> str:
     return "svn"
 
 
+def is_svn_url_or_repo(target: str | Path) -> bool:
+    """
+    Determine if target is an SVN URL (http://, svn://, file://, etc.) or a raw SVN repository directory.
+    """
+    target_str = str(target).strip()
+    url_schemes = ("http://", "https://", "svn://", "svn+ssh://", "file://")
+    if any(target_str.startswith(scheme) for scheme in url_schemes):
+        return True
+
+    p = Path(target_str)
+    # Check if local path points to an SVN repository store (not a working copy)
+    if p.is_dir() and (p / "format").is_file() and (p / "db").is_dir():
+        return True
+
+    return False
+
+
+def get_default_managed_svn_dir(git_repo_dir: Path) -> Path:
+    """Return canonical path for the repository-local managed SVN working copy."""
+    return git_repo_dir / ".git" / "git2svn" / "svn_wc"
+
+
+def checkout_working_copy(
+    target_url_or_repo: str | Path,
+    destination_dir: Path,
+    svn_bin: Optional[str] = None,
+    dry_run: bool = False,
+) -> None:
+    """
+    Check out an SVN working copy to destination_dir from an SVN URL or repo path.
+    """
+    bin_name = svn_bin or find_svn_binary()
+    target_str = str(target_url_or_repo).strip()
+    if not any(target_str.startswith(s) for s in ("http://", "https://", "svn://", "svn+ssh://", "file://")):
+        # If it's a local filesystem repo path, convert to file:// URI
+        target_str = Path(target_str).resolve().as_uri()
+
+    destination_dir = destination_dir.resolve()
+    if dry_run:
+        print(f"[DRY-RUN] {bin_name} checkout {target_str} {destination_dir}")
+        return
+
+    destination_dir.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Checking out SVN working copy from %s to %s...", target_str, destination_dir)
+    res = subprocess.run(
+        [bin_name, "checkout", target_str, str(destination_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if res.returncode != 0:
+        logger.error("Failed to checkout SVN repository: %s", res.stderr.strip())
+        raise parse_svn_error(res.stderr, f"checkout '{target_str}'", destination_dir)
+
+
 class SvnError(RuntimeError):
     """Base exception for Subversion command failures."""
 

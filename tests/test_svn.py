@@ -179,6 +179,68 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
         mock_cmd.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="Not a working copy")
         self.assertFalse(ws.is_valid_workspace())
 
+    def test_is_svn_url_or_repo(self):
+        """Verify detection of SVN URLs and repository stores."""
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo("http://svn.example.com/repo"))
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo("https://svn.example.com/repo"))
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo("svn://svn.example.com/repo"))
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo("svn+ssh://user@host/repo"))
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo("file:///var/svn/repo"))
+
+        # Local repo store (with format file and db dir)
+        repo_dir = self.path / "svn_repo_store"
+        repo_dir.mkdir()
+        (repo_dir / "format").write_text("12\n")
+        (repo_dir / "db").mkdir()
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo(repo_dir))
+        self.assertTrue(git2svn.svn.is_svn_url_or_repo(str(repo_dir)))
+
+        # Standard non-repo directories
+        normal_dir = self.path / "normal_dir"
+        normal_dir.mkdir()
+        self.assertFalse(git2svn.svn.is_svn_url_or_repo(normal_dir))
+        self.assertFalse(git2svn.svn.is_svn_url_or_repo("some/relative/path"))
+
+    def test_get_default_managed_svn_dir(self):
+        """Verify canonical managed SVN working copy path inside .git."""
+        git_dir = Path("/path/to/myrepo")
+        managed = git2svn.svn.get_default_managed_svn_dir(git_dir)
+        self.assertEqual(managed, git_dir / ".git" / "git2svn" / "svn_wc")
+
+    @patch("subprocess.run")
+    def test_checkout_working_copy_success(self, mock_run):
+        """Verify checkout_working_copy executes svn checkout."""
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="Checked out revision 1.\n", stderr="")
+        dest = self.path / "managed_wc"
+        git2svn.svn.checkout_working_copy("https://svn.example.com/trunk", dest)
+
+        svn_bin = git2svn.svn.find_svn_binary()
+        mock_run.assert_called_once_with(
+            [svn_bin, "checkout", "https://svn.example.com/trunk", str(dest)],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    @patch("subprocess.run")
+    def test_checkout_working_copy_failure_raises(self, mock_run):
+        """Verify checkout_working_copy raises SvnError on failure."""
+        mock_run.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="svn: E170013: Unable to connect")
+        dest = self.path / "fail_wc"
+        with self.assertRaises(git2svn.SvnError):
+            git2svn.svn.checkout_working_copy("https://invalid.example.com", dest)
+
+    def test_checkout_working_copy_dry_run(self):
+        """Verify dry run prints command without running subprocess."""
+        dest = self.path / "dry_wc"
+        with patch("builtins.print") as mock_print, patch("subprocess.run") as mock_run:
+            git2svn.svn.checkout_working_copy("https://svn.example.com/trunk", dest, dry_run=True)
+            mock_run.assert_not_called()
+            mock_print.assert_called_once()
+            self.assertIn("[DRY-RUN]", mock_print.call_args[0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

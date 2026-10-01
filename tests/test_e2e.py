@@ -401,3 +401,42 @@ class TestGit2SvnE2E(unittest.TestCase):
         # Run git2svn status
         exit_code = cli_main(["status", "-g", str(self.git_dir)])
         self.assertEqual(exit_code, 0)
+
+    def test_e2e_setup_with_svn_url_and_replay(self):
+        """Test git2svn setup with a real SVN URL (file://) and subsequent replay with no --svn-dir."""
+        # 1. Create a fresh git repo
+        fresh_git = self.root_path / "fresh_git"
+        fresh_git.mkdir()
+        subprocess.run([GIT_BIN, "init", "-b", "main"], cwd=fresh_git, check=True, capture_output=True)
+        subprocess.run([GIT_BIN, "config", "user.name", "E2E Test"], cwd=fresh_git, check=True)
+        subprocess.run([GIT_BIN, "config", "user.email", "e2e@example.com"], cwd=fresh_git, check=True)
+        subprocess.run([GIT_BIN, "config", "commit.gpgsign", "false"], cwd=fresh_git, check=True)
+
+        # 2. Run setup pointing directly to the SVN repository URL
+        svn_repo_url = self.svn_repo_dir.as_uri()
+        code = cli_main(["setup", svn_repo_url, "-g", str(fresh_git)])
+        self.assertEqual(code, 0)
+
+        # Verify git config was stored
+        managed_wc = fresh_git / ".git" / "git2svn" / "svn_wc"
+        self.assertTrue((managed_wc / ".svn").is_dir())
+
+        # 3. Create a commit in Git
+        test_file = fresh_git / "managed_demo.txt"
+        test_file.write_text("Synced via managed working copy!\n", encoding="utf-8")
+        subprocess.run([GIT_BIN, "add", "."], cwd=fresh_git, check=True)
+        subprocess.run([GIT_BIN, "commit", "-m", "feat: managed wc feature"], cwd=fresh_git, check=True)
+        commit_res = subprocess.run(
+            [GIT_BIN, "rev-parse", "HEAD"], cwd=fresh_git, check=True, capture_output=True, text=True
+        )
+        c_hash = commit_res.stdout.strip()
+
+        # 4. Run git2svn replay with NO --svn-dir (auto-resolves managed working copy)
+        replay_code = cli_main(["replay", c_hash, "-g", str(fresh_git)])
+        self.assertEqual(replay_code, 0)
+
+        # 5. Verify the file exists in the managed working copy and in SVN log
+        self.assertTrue((managed_wc / "managed_demo.txt").is_file())
+        self.assertEqual(
+            (managed_wc / "managed_demo.txt").read_text(encoding="utf-8"), "Synced via managed working copy!\n"
+        )

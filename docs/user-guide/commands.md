@@ -157,18 +157,31 @@ flowchart TD
 
 ## 4. Command: `setup`
 
-Automates initial repository configuration for a fresh clone or existing repository.
+Automates initial repository configuration for a fresh clone or existing repository. Accepts either a local working copy path or an SVN repository URL:
 
 ```bash
+# Option A: With an SVN repository URL (managed working copy in .git/git2svn/svn_wc/):
+git2svn setup https://svn.example.com/repo/trunk
+
+# Option B: With an existing local SVN working copy:
 git2svn setup /path/to/svn
 ```
 
 ### What `setup` does:
-1. **Validates SVN Working Copy:** Verifies that `/path/to/svn` contains a `.svn` directory.
+1. **Dynamic Target Detection:**
+   - If an **SVN URL** (`https://`, `svn://`, `file://`, etc.) or repository store is given:
+     - Sets up a managed internal working copy in `.git/git2svn/svn_wc/`.
+     - Automatically runs `svn checkout <url> .git/git2svn/svn_wc/`.
+     - Sets `git config git2svn.svnUrl <url>` and `git config git2svn.svnDir <managed_dir>`.
+     - Future commands (`stage`, `replay`, `diff`, `status`) work seamlessly without needing `--svn-dir`!
+   - If a **local working copy path** is given:
+     - Validates that the path contains a `.svn` directory.
+     - Sets `git config git2svn.svnDir <path/to/svn>`.
 2. **Auto-Detects Local Trunk Branch:** Inspects local branches with preference for `trunk`, falling back to `main`, `master`, or the current branch.
 3. **Auto-Detects Remote Mirror Tracking Branch:** Scans remote branches for `svn-mirror/trunk`, `origin/trunk`, or branches matching the detected trunk name.
 4. **Writes Git Configuration:**
    - `git config git2svn.svnDir <path/to/svn>`
+   - `git config git2svn.svnUrl <url>` (if URL provided)
    - `git config git2svn.defaultRange "<remote_branch>..<trunk_branch>"`
    - `git config pull.ff only` (prevents accidental merge commits when pulling)
 5. **Configures Safe Productivity Aliases:**

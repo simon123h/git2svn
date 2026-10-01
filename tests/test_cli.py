@@ -149,6 +149,69 @@ class TestCli(unittest.TestCase):
             res = git2svn.main(["--git-dir", str(git_dir), "setup", str(not_svn)])
             self.assertEqual(res, 1)
 
+    def test_setup_with_svn_url_and_checkout(self):
+        """Verify setup with an SVN URL checks out managed working copy and configures svnUrl/svnDir."""
+        git_dir = self.path / "url_setup_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=git_dir, check=True, capture_output=True)
+        (git_dir / "README.md").write_text("hello")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        with patch("git2svn.setup.checkout_working_copy") as mock_checkout:
+            res = git2svn.main(["--git-dir", str(git_dir), "setup", "https://svn.example.com/trunk"])
+            self.assertEqual(res, 0)
+            managed_dir = git2svn.svn.get_default_managed_svn_dir(git_dir)
+            mock_checkout.assert_called_once_with("https://svn.example.com/trunk", managed_dir)
+
+            git_repo = git2svn.GitRepo(git_dir)
+            self.assertEqual(git_repo.get_config("git2svn.svnUrl"), "https://svn.example.com/trunk")
+            self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(managed_dir).replace("\\", "/"))
+
+    def test_setup_with_svn_url_checkout_error(self):
+        """Verify setup fails cleanly if checkout raises SvnError."""
+        git_dir = self.path / "url_fail_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=git_dir, check=True, capture_output=True)
+
+        with (
+            patch("git2svn.setup.checkout_working_copy", side_effect=git2svn.SvnError("Checkout connection error")),
+            patch("sys.stderr"),
+        ):
+            res = git2svn.main(["--git-dir", str(git_dir), "setup", "https://invalid.example.com/repo"])
+            self.assertEqual(res, 1)
+
+    def test_cli_auto_checkout_managed_working_copy(self):
+        """Verify CLI commands automatically check out working copy if missing and svnUrl is set."""
+        git_dir = self.path / "auto_co_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=git_dir, check=True, capture_output=True)
+        (git_dir / "file.txt").write_text("hello")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        git_repo = git2svn.GitRepo(git_dir)
+        git_repo.set_config("git2svn.svnUrl", "https://svn.example.com/trunk")
+        managed_dir = git2svn.svn.get_default_managed_svn_dir(git_dir)
+
+        # Mock checkout so that it creates .svn in managed_dir
+        def fake_checkout(url, dest):
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / ".svn").mkdir()
+
+        with (
+            patch("git2svn.cli.checkout_working_copy", side_effect=fake_checkout) as mock_co,
+            patch("git2svn.cli.Synchronizer") as mock_sync_cls,
+        ):
+            code = git2svn.main(["--git-dir", str(git_dir), "stage", "HEAD"])
+            self.assertEqual(code, 0)
+            mock_co.assert_called_once_with("https://svn.example.com/trunk", managed_dir)
+            self.assertTrue(mock_sync_cls.called)
+
     def test_cli_missing_ref_errors(self):
         """Verify stage and replay exit with code 1 if ref is missing and no defaultRange configured."""
         svn_dir = self.path / "cli_err_svn"

@@ -13,7 +13,14 @@ from .core import Synchronizer
 from .git import GitRepo
 from .patcher import Patcher
 from .state import load_replay_state
-from .svn import SvnError, SvnLockError, SvnOutOfDateError, SvnWorkspace
+from .svn import (
+    SvnError,
+    SvnLockError,
+    SvnOutOfDateError,
+    SvnWorkspace,
+    checkout_working_copy,
+    get_default_managed_svn_dir,
+)
 
 logger = logging.getLogger("git2svn")
 
@@ -52,7 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
         "-s",
         type=Path,
         default=argparse.SUPPRESS,
-        help="Path to SVN working copy (default: $SVN_DIR environment variable)",
+        help="Path to SVN working copy (optional, defaults to git config git2svn.svnDir, $SVN_DIR, or managed working copy)",
+    )
+    common_parser.add_argument(
+        "--svn-url",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="SVN repository URL (optional, defaults to git config git2svn.svnUrl or $SVN_URL)",
     )
     common_parser.add_argument(
         "--dry-run",
@@ -213,12 +226,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser_setup.add_argument(
-        "setup_svn_dir",
+        "setup_target",
         nargs="?",
-        type=Path,
+        type=str,
         default=None,
-        metavar="SVN_DIR",
-        help="Path to SVN working copy (optional if already configured or set via --svn-dir)",
+        metavar="SVN_TARGET",
+        help="Path to SVN working copy or SVN repository URL (optional if already configured or set via --svn-dir/--svn-url)",
     )
 
     # diff
@@ -266,6 +279,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     namespace = argparse.Namespace(
         git_dir=None,
         svn_dir=None,
+        svn_url=None,
         dry_run=False,
         verbose=False,
         copy=False,
@@ -309,7 +323,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     if args.command == "setup":
-        svn_arg = getattr(args, "setup_svn_dir", None) or getattr(args, "svn_dir", None)
+        svn_arg = (
+            getattr(args, "setup_target", None) or getattr(args, "svn_url", None) or getattr(args, "svn_dir", None)
+        )
         return handle_setup(git_repo, svn_arg)
 
     # 1. SVN workspace directory resolution: CLI arg -> $SVN_DIR -> git config -> replay cwd
@@ -319,6 +335,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         if config_svn:
             svn_dir = Path(config_svn)
 
+    # 2. SVN URL resolution: CLI arg -> $SVN_URL -> git config
+    svn_url = getattr(args, "svn_url", None) or (os.environ.get("SVN_URL") if "SVN_URL" in os.environ else None)
+    if not svn_url:
+        svn_url = git_repo.get_config("git2svn.svnUrl")
+
+    # If svn_dir was not explicitly set but svn_url is known, default to managed working copy
+    if not svn_dir and svn_url:
+        svn_dir = get_default_managed_svn_dir(git_repo.repo_dir)
+
     # Auto-detect svn_dir from cwd for replay actions if cwd is an SVN checkout
     if not svn_dir and args.command == "replay" and getattr(args, "replay_action", None):
         cwd = Path.cwd()
@@ -327,10 +352,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not svn_dir:
         print(
-            "Error: SVN workspace directory must be specified via --svn-dir, SVN_DIR env, or 'git config git2svn.svnDir <path>'.",
+            "Error: SVN workspace directory or repository URL must be specified via --svn-dir/--svn-url, "
+            "SVN_DIR/SVN_URL env, or 'git2svn setup <url-or-path>'.",
             file=sys.stderr,
         )
         return 1
+
+    # Check if working copy needs to be checked out from svn_url (self-healing / managed working copy)
+    if svn_url and not (svn_dir / ".svn").exists() and not args.dry_run:
+        print(f"SVN working copy missing at {svn_dir}. Checking out from {svn_url}...")
+        try:
+            checkout_working_copy(svn_url, svn_dir)
+        except SvnError as e:
+            print(f"Error checking out SVN repository:\n  {e.args[0]}", file=sys.stderr)
+            return 1
 
     # Config fallbacks for dry_run and copy
     dry_run = args.dry_run

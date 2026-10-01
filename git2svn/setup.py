@@ -6,50 +6,75 @@ from pathlib import Path
 from typing import Optional
 
 from .git import GitRepo
+from .svn import (
+    SvnError,
+    checkout_working_copy,
+    get_default_managed_svn_dir,
+    is_svn_url_or_repo,
+)
 
 
-def run_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
+def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     """Automate repository configuration, branch detection, and productivity aliases."""
     if not git_repo.is_valid_repo():
         print(f"Error: '{git_repo.repo_dir}' is not a valid Git repository.", file=sys.stderr)
         return 1
 
-    # 1. Resolve SVN working copy path
-    resolved_svn: Optional[Path] = None
-    if svn_dir_path:
-        resolved_svn = Path(svn_dir_path).resolve()
-    else:
+    # 1. Resolve SVN target (URL, repo path, or existing working copy)
+    raw_target: Optional[str] = str(svn_target).strip() if svn_target else None
+    if not raw_target:
         # Check existing config or environment variable
+        cfg_url = git_repo.get_config("git2svn.svnUrl")
         cfg_svn = git_repo.get_config("git2svn.svnDir")
-        if cfg_svn:
-            resolved_svn = Path(cfg_svn).resolve()
+        if cfg_url:
+            raw_target = cfg_url
+        elif cfg_svn:
+            raw_target = cfg_svn
+        elif "SVN_URL" in os.environ:
+            raw_target = os.environ["SVN_URL"].strip()
         elif "SVN_DIR" in os.environ:
-            resolved_svn = Path(os.environ["SVN_DIR"]).resolve()
+            raw_target = os.environ["SVN_DIR"].strip()
 
-    if not resolved_svn:
+    if not raw_target:
         # Interactive prompt if stdin is a tty, otherwise display error
         if sys.stdin.isatty():
             try:
-                entered = input("Path to SVN working copy: ").strip()
+                entered = input("Path to SVN working copy or SVN repository URL: ").strip()
                 if entered:
-                    resolved_svn = Path(entered).resolve()
+                    raw_target = entered
             except (EOFError, KeyboardInterrupt):
                 print("", file=sys.stderr)
                 return 1
 
-    if not resolved_svn:
+    if not raw_target:
         print(
-            "Error: SVN working copy path must be provided: 'git2svn setup <path/to/svn>'.",
+            "Error: SVN working copy path or SVN repository URL must be provided: 'git2svn setup <url-or-path>'.",
             file=sys.stderr,
         )
         return 1
 
-    if not (resolved_svn / ".svn").exists():
-        print(
-            f"Error: '{resolved_svn}' does not appear to be an SVN working copy (no .svn found).",
-            file=sys.stderr,
-        )
-        return 1
+    resolved_svn: Optional[Path] = None
+    configured_url: Optional[str] = None
+
+    if is_svn_url_or_repo(raw_target):
+        configured_url = raw_target
+        managed_dir = get_default_managed_svn_dir(git_repo.repo_dir)
+        print(f"Detected SVN repository URL: {configured_url}")
+        print(f"Setting up managed working copy at: {managed_dir}")
+        try:
+            checkout_working_copy(configured_url, managed_dir)
+            resolved_svn = managed_dir
+        except SvnError as e:
+            print(f"Error checking out SVN repository:\n  {e.args[0]}", file=sys.stderr)
+            return 1
+    else:
+        resolved_svn = Path(raw_target).resolve()
+        if not (resolved_svn / ".svn").exists():
+            print(
+                f"Error: '{resolved_svn}' does not appear to be an SVN working copy (no .svn found).",
+                file=sys.stderr,
+            )
+            return 1
 
     # 2. Auto-detect local trunk branch
     local_branches = git_repo.get_local_branches()
@@ -89,6 +114,8 @@ def run_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
     # SVN directory path (use forward slashes for cross-platform consistency in git config)
     svn_dir_str = str(resolved_svn).replace("\\", "/")
     git_repo.set_config("git2svn.svnDir", svn_dir_str)
+    if configured_url:
+        git_repo.set_config("git2svn.svnUrl", configured_url)
     git_repo.set_config("pull.ff", "only")
 
     default_range: Optional[str] = None
@@ -120,6 +147,8 @@ def run_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
     git_repo.set_config("alias.svn-status", status_script)
 
     print("Successfully configured git2svn:")
+    if configured_url:
+        print(f"  git2svn.svnUrl      = {configured_url}")
     print(f"  git2svn.svnDir      = {svn_dir_str}")
     if default_range:
         print(f"  git2svn.defaultRange= {default_range}")
