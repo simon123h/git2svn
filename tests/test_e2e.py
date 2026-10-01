@@ -232,3 +232,151 @@ class TestGit2SvnE2E(unittest.TestCase):
         status = self._svn_status()
         self.assertIn("D       obsolete.txt", status)
         self.assertIn("A       brand_new.txt", status)
+
+    def test_e2e_replay_conflict_pause_and_continue(self):
+        """Test replay pausing on a patch conflict in a real SVN WC and resuming with --continue."""
+        # 1. Base commit in Git and SVN
+        f_git = self.git_dir / "conflict_target.txt"
+        f_git.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+        base_hash = self._git_commit("base: conflict target")
+
+        (self.svn_wc_dir / "conflict_target.txt").write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "add", "conflict_target.txt"], cwd=self.svn_wc_dir, check=True)
+        subprocess.run([SVN_BIN, "commit", "-m", "init conflict target"], cwd=self.svn_wc_dir, check=True)
+
+        # 2. Modify in SVN out-of-band to cause conflict
+        (self.svn_wc_dir / "conflict_target.txt").write_text("line 1 DIFFERENT\nline 2\nline 3\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "commit", "-m", "remote edit in svn"], cwd=self.svn_wc_dir, check=True)
+        subprocess.run([SVN_BIN, "update"], cwd=self.svn_wc_dir, check=True)
+
+        # 3. Git commit 1 (touches line 1 and 2, which conflicts)
+        f_git.write_text("line 1 GIT_EDIT\nline 2 GIT_EDIT\nline 3\n", encoding="utf-8")
+        self._git_commit("feat: conflicting git commit")
+
+        # 4. Git commit 2 (subsequent non-conflicting commit)
+        f_next = self.git_dir / "subsequent.txt"
+        f_next.write_text("subsequent content\n", encoding="utf-8")
+        c2_hash = self._git_commit("feat: subsequent commit")
+
+        # 5. Run replay range - should pause with non-zero exit code due to conflict
+        exit_code = cli_main(["replay", f"{base_hash}..{c2_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertNotEqual(exit_code, 0)
+
+        # Verify .rej artifact exists
+        rej_file = self.svn_wc_dir / "conflict_target.txt.rej"
+        self.assertTrue(rej_file.exists())
+
+        # 6. Resolve conflict manually in SVN working copy and remove .rej artifact
+        (self.svn_wc_dir / "conflict_target.txt").write_text(
+            "line 1 RESOLVED\nline 2 GIT_EDIT\nline 3\n", encoding="utf-8"
+        )
+        rej_file.unlink()
+
+        # 7. Continue replay
+        cont_code = cli_main(["replay", "--continue", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertEqual(cont_code, 0)
+
+        # Verify SVN working copy is clean and both commits are in SVN log
+        self.assertEqual(self._svn_status().strip(), "")
+        _, full_log = self._svn_log_messages()
+        self.assertIn("conflicting git commit", full_log)
+        self.assertIn("subsequent commit", full_log)
+
+        # Verify final files on disk in SVN
+        self.assertEqual(
+            (self.svn_wc_dir / "conflict_target.txt").read_text(encoding="utf-8"),
+            "line 1 RESOLVED\nline 2 GIT_EDIT\nline 3\n",
+        )
+        self.assertEqual((self.svn_wc_dir / "subsequent.txt").read_text(encoding="utf-8"), "subsequent content\n")
+
+    def test_e2e_file_renames_and_moves(self):
+        """Test replay correctly handles file renames and moves across directories in real SVN."""
+        # 1. Base commit: create src/old_name.txt
+        src_dir = self.git_dir / "src"
+        src_dir.mkdir()
+        orig_file = src_dir / "old_name.txt"
+        orig_file.write_text("print('hello rename')\n", encoding="utf-8")
+        base_hash = self._git_commit("init: original file")
+
+        # Replay base to SVN
+        code_base = cli_main(["replay", base_hash, "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertEqual(code_base, 0)
+
+        # 2. Git commit: rename src/old_name.txt -> src/nested/renamed.txt
+        nested_dir = src_dir / "nested"
+        nested_dir.mkdir()
+        subprocess.run([GIT_BIN, "mv", "src/old_name.txt", "src/nested/renamed.txt"], cwd=self.git_dir, check=True)
+        rename_hash = self._git_commit("refactor: move and rename file")
+
+        # 3. Replay rename commit to SVN
+        code_rename = cli_main(
+            ["replay", f"{base_hash}..{rename_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+        )
+        self.assertEqual(code_rename, 0)
+
+        # 4. Verify SVN state
+        self.assertFalse((self.svn_wc_dir / "src" / "old_name.txt").exists())
+        renamed_svn = self.svn_wc_dir / "src" / "nested" / "renamed.txt"
+        self.assertTrue(renamed_svn.is_file())
+        self.assertEqual(renamed_svn.read_text(encoding="utf-8"), "print('hello rename')\n")
+        self.assertEqual(self._svn_status().strip(), "")
+
+    def test_e2e_binary_files(self):
+        """Test replay correctly handles adding and modifying binary files with null bytes in real SVN."""
+        # 1. Root commit
+        (self.git_dir / "init.txt").write_text("init\n")
+        root_hash = self._git_commit("init: root commit")
+
+        # Replay root commit to SVN
+        code_root = cli_main(["replay", root_hash, "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertEqual(code_root, 0)
+
+        # 2. Add binary file
+        bin_git = self.git_dir / "image.bin"
+        initial_bytes = bytes([0x00, 0xFF, 0xFE, 0x01, 0x00, 0x42, 0xAA, 0x55] * 32)
+        bin_git.write_bytes(initial_bytes)
+        self._git_commit("feat: add binary image")
+
+        # 3. Modify binary file
+        modified_bytes = bytes([0x00, 0x00, 0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA] * 40)
+        bin_git.write_bytes(modified_bytes)
+        mod_hash = self._git_commit("fix: update binary bytes")
+
+        # 4. Replay range to SVN
+        code = cli_main(["replay", f"{root_hash}..{mod_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertEqual(code, 0)
+
+        # 4. Verify SVN file content is bit-for-bit identical
+        bin_svn = self.svn_wc_dir / "image.bin"
+        self.assertTrue(bin_svn.is_file())
+        self.assertEqual(bin_svn.read_bytes(), modified_bytes)
+        self.assertEqual(self._svn_status().strip(), "")
+
+    def test_e2e_status_real_repo(self):
+        """Test git2svn status command execution against real Git and real SVN repositories."""
+        # Setup base commit in Git and SVN
+        f = self.git_dir / "status_test.txt"
+        f.write_text("status test\n", encoding="utf-8")
+        base_hash = self._git_commit("init: status test file")
+
+        cli_main(["replay", base_hash, "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+
+        # Setup pending commit in Git
+        f.write_text("status test modified\n", encoding="utf-8")
+        pending_hash = self._git_commit("feat: pending feature for status")
+
+        # Configure defaultRange and svnDir in Git config
+        subprocess.run(
+            [GIT_BIN, "config", "git2svn.defaultRange", f"{base_hash}..{pending_hash}"],
+            cwd=self.git_dir,
+            check=True,
+        )
+        subprocess.run(
+            [GIT_BIN, "config", "git2svn.svnDir", str(self.svn_wc_dir)],
+            cwd=self.git_dir,
+            check=True,
+        )
+
+        # Run git2svn status
+        exit_code = cli_main(["status", "-g", str(self.git_dir)])
+        self.assertEqual(exit_code, 0)
