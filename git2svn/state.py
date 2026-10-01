@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 logger = logging.getLogger("git2svn")
 
@@ -28,7 +28,9 @@ def load_replay_state(workspace_dir: Path) -> Optional[Dict[str, Any]]:
     path = get_replay_state_path(workspace_dir)
     if path.is_file():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            val = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(val, dict):
+                return cast(Dict[str, Any], val)
         except Exception as e:
             logger.error("Failed to parse replay state file: %s", e)
     return None

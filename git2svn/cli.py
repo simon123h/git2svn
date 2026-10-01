@@ -224,7 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
 def handle_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
     """Automate repository configuration, branch detection, and productivity aliases."""
     if not git_repo.is_valid_repo():
-        print(f"Error: '{git_repo.root_dir}' is not a valid Git repository.", file=sys.stderr)
+        print(f"Error: '{git_repo.repo_dir}' is not a valid Git repository.", file=sys.stderr)
         return 1
 
     # 1. Resolve SVN working copy path

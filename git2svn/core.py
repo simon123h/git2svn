@@ -591,7 +591,7 @@ class Synchronizer:
                 is_single, start_ref, end_ref = parse_ref_arguments(default_range)
                 if is_single:
                     commits = [start_ref] if self.git.ref_exists(start_ref) else []
-                    merges = []
+                    merges: List[str] = []
                 else:
                     assert end_ref is not None
                     if not self.git.ref_exists(start_ref):

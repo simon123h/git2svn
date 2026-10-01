@@ -7,8 +7,8 @@ on:
     branches: [ "main" ]
 
 jobs:
-  lint-and-format:
-    name: Lint & Format (Ruff)
+  lint-format-typecheck:
+    name: Lint, Format & Type Check
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -19,14 +19,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Ruff
-        run: pip install ruff
+      - name: Install Tooling
+        run: pip install ruff mypy
 
       - name: Run Ruff Lint Checks
         run: ruff check .
 
       - name: Verify Formatting with Ruff
         run: ruff format --check .
+
+      - name: Type Check with MyPy
+        run: mypy git2svn
 
   test:
     name: Test on Python ${{ matrix.python-version }} (${{ matrix.os }})

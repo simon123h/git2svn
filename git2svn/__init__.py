@@ -20,7 +20,7 @@ from .state import (
 from .svn import SvnError, SvnLockError, SvnOutOfDateError, SvnWorkspace
 
 try:
-    from ._version import __version__
+    from ._version import __version__  # type: ignore[import-not-found]
 except ImportError:
     __version__ = "0.0.0.dev0"
 
@@ -30,9 +30,9 @@ def get_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("git2svn")
+        return str(version("git2svn"))
     except Exception:
-        return __version__
+        return str(__version__)
 
 
 __all__ = [
