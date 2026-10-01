@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .colors import TerminalColor
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_ref_arguments
 from .patcher import Patcher
@@ -32,12 +33,14 @@ class Synchronizer:
         patcher: Patcher,
         dry_run: bool = False,
         auto_update: bool = False,
+        color_mode: str = "auto",
     ):
         self.git = git_repo
         self.svn = svn_workspace
         self.patcher = patcher
         self.dry_run = dry_run
         self.auto_update = auto_update
+        self.color = TerminalColor(color_mode)
 
     def show_identity_banner(self, target_ref_spec: str) -> None:
         """Display identity banner showing active Git and SVN target branches/URLs."""
@@ -522,6 +525,7 @@ class Synchronizer:
             1 if errors, working copy locked, merge conflicts, or linear violations exist
         """
         has_error = False
+        c = self.color
 
         # 1. Check in-progress replay state
         state = load_replay_state(self.svn.workspace_dir)
@@ -534,59 +538,69 @@ class Synchronizer:
             completed = state.get("completed_commits", 0)
             total = state.get("total_commits", len(remaining) + 1)
 
-            print("[Replay In Progress]")
-            print(f'  State     : PAUSED (conflict at commit {current_commit[:8]} "{first_msg}")')
+            print(c.bold_red("[Replay In Progress]"))
+            print(
+                f'  State     : {c.bold_red("PAUSED")} (conflict at commit {c.yellow(current_commit[:8])} "{first_msg}")'
+            )
             print(f"  Progress  : {completed} of {total} commits applied ({len(remaining)} remaining)")
 
             rej_files = find_conflict_artifacts(self.svn.workspace_dir)
             if rej_files:
                 rel_rejs = [str(r.relative_to(self.svn.workspace_dir)) for r in rej_files]
-                print(f"  Conflicts : {', '.join(rel_rejs)}")
-            print("  Action    : Resolve conflicts and run 'git2svn replay --continue' (or '--abort' / '--skip')\n")
+                print(f"  Conflicts : {c.bold_red(', '.join(rel_rejs))}")
+            action_text = (
+                f"Resolve conflicts and run {c.bold_cyan('git2svn replay --continue')} (or '--abort' / '--skip')"
+            )
+            print(f"  Action    : {action_text}\n")
 
         # 2. Git Workspace Status
         git_clean = self.git.is_clean()
         branch = self.git.get_current_branch()
         head_commit = self.git.get_head_commit()
         head_subject = self.git.get_head_subject()
-        head_desc = f'{head_commit} "{head_subject}"' if head_subject else head_commit
+        head_desc = f'{c.yellow(head_commit)} "{head_subject}"' if head_subject else c.yellow(head_commit)
 
-        print("[Git Workspace]")
+        print(c.bold_cyan("[Git Workspace]"))
         print(f"  Repository: {self.git.repo_dir}")
-        print(f"  Branch    : {branch} (at {head_desc})")
-        print(f"  Tree      : {'Clean' if git_clean else 'Dirty (uncommitted changes present)'}")
+        print(f"  Branch    : {c.bold(branch)} (at {head_desc})")
+        if git_clean:
+            print(f"  Tree      : {c.bold_green('Clean')}")
+        else:
+            print(f"  Tree      : {c.bold_yellow('Dirty')} (uncommitted changes present)")
 
         # 3. SVN Working Copy Status
-        print("\n[SVN Working Copy]")
+        print(f"\n{c.bold_cyan('[SVN Working Copy]')}")
         print(f"  Path      : {self.svn.workspace_dir}")
         svn_info = self.svn.get_info()
         svn_url = svn_info.get("URL") or svn_info.get("Relative URL") or "unknown"
         svn_rev = svn_info.get("Revision")
-        rev_str = f" (r{svn_rev})" if svn_rev else ""
+        rev_str = f" ({c.dim(f'r{svn_rev}')})" if svn_rev else ""
         print(f"  Target    : {svn_url}{rev_str}")
 
         try:
             svn_clean = self.svn.is_clean()
             if svn_clean:
-                print("  Tree      : Clean (no uncommitted changes, unlocked)")
+                print(f"  Tree      : {c.bold_green('Clean')} (no uncommitted changes, unlocked)")
             else:
                 uncommitted = self.svn.get_status_summary()
-                print(f"  Tree      : Dirty ({len(uncommitted)} uncommitted changes)")
+                print(f"  Tree      : {c.bold_yellow(f'Dirty ({len(uncommitted)} uncommitted changes)')}")
                 for item in uncommitted[:5]:
                     print(f"              {item}")
                 if len(uncommitted) > 5:
-                    print(f"              ... and {len(uncommitted) - 5} more")
+                    print(f"              {c.dim(f'... and {len(uncommitted) - 5} more')}")
         except SvnError as e:
             has_error = True
-            print(f"  Tree      : Error: {e.args[0].splitlines()[0]}")
+            print(f"  Tree      : {c.bold_red(f'Error: {e.args[0].splitlines()[0]}')}")
 
         # 4. Synchronization Queue & Default Range
         default_range = self.git.get_config("git2svn.defaultRange")
-        print("\n[Synchronization]")
+        print(f"\n{c.bold_cyan('[Synchronization]')}")
         if not default_range:
-            print("  Range     : Not configured (run 'git2svn setup' or 'git config git2svn.defaultRange <range>')")
+            print(
+                f"  Range     : {c.dim('Not configured')} (run 'git2svn setup' or 'git config git2svn.defaultRange <range>')"
+            )
         else:
-            print(f"  Range     : {default_range}")
+            print(f"  Range     : {c.bold(default_range)}")
             try:
                 is_single, start_ref, end_ref = parse_ref_arguments(default_range)
                 if is_single:
@@ -595,11 +609,13 @@ class Synchronizer:
                 else:
                     assert end_ref is not None
                     if not self.git.ref_exists(start_ref):
-                        print(f"  Warning   : Range start ref '{start_ref}' not found in Git.")
+                        warn_msg = f"Range start ref '{start_ref}' not found in Git."
+                        print(f"  Warning   : {c.bold_yellow(warn_msg)}")
                         commits = []
                         merges = []
                     elif not self.git.ref_exists(end_ref):
-                        print(f"  Warning   : Range end ref '{end_ref}' not found in Git.")
+                        warn_msg = f"Range end ref '{end_ref}' not found in Git."
+                        print(f"  Warning   : {c.bold_yellow(warn_msg)}")
                         commits = []
                         merges = []
                     else:
@@ -608,24 +624,25 @@ class Synchronizer:
 
                 if merges:
                     has_error = True
-                    print(
-                        f"  Linearity : INVALID ({len(merges)} merge commits found in range - linear rebase required)"
-                    )
+                    inv_msg = f"INVALID ({len(merges)} merge commits found in range - linear rebase required)"
+                    print(f"  Linearity : {c.bold_red(inv_msg)}")
                 else:
-                    print("  Linearity : OK (strictly linear)")
+                    print(f"  Linearity : {c.bold_green('OK')} (strictly linear)")
 
                 if not commits:
-                    print("  Pending   : In sync (0 commits to replay)")
+                    print(f"  Pending   : {c.bold_green('In sync')} (0 commits to replay)")
                 else:
-                    print(f"  Pending   : {len(commits)} commit(s) ready to replay:")
+                    pending_title = f"{len(commits)} commit(s) ready to replay:"
+                    print(f"  Pending   : {c.bold_yellow(pending_title)}")
                     for idx, c_hash in enumerate(commits[:10], start=1):
                         msg = self.git.get_commit_message(c_hash)
                         subject = msg.splitlines()[0] if msg else ""
-                        print(f"              {idx}. [{c_hash[:8]}] {subject}")
+                        print(f"              {c.dim(f'{idx}.')} [{c.yellow(c_hash[:8])}] {subject}")
                     if len(commits) > 10:
-                        print(f"              ... and {len(commits) - 10} more")
+                        print(f"              {c.dim(f'... and {len(commits) - 10} more')}")
             except Exception as e:
-                print(f"  Error     : Could not parse range '{default_range}': {e}")
+                err_msg = f"Could not parse range '{default_range}': {e}"
+                print(f"  Error     : {c.bold_red(err_msg)}")
                 has_error = True
 
         if has_error:

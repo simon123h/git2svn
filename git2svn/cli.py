@@ -67,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Enable verbose output",
     )
+    common_parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default=argparse.SUPPRESS,
+        help="Control colored output (auto, always, never; default: git config git2svn.color or auto)",
+    )
 
     parser = argparse.ArgumentParser(
         prog="git2svn",
@@ -435,8 +441,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Error: '{svn_dir}' does not appear to be an SVN working copy (no .svn found).", file=sys.stderr)
         return 1
 
+    # Color mode: CLI --color -> git config git2svn.color -> "auto"
+    color_mode = getattr(args, "color", None)
+    if not color_mode:
+        config_color = git_repo.get_config("git2svn.color")
+        color_mode = config_color if config_color in ("auto", "always", "never") else "auto"
+
     patcher = Patcher(svn_dir, dry_run=dry_run)
-    sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=dry_run, auto_update=auto_update)
+    sync_mgr = Synchronizer(
+        git_repo,
+        svn_workspace,
+        patcher,
+        dry_run=dry_run,
+        auto_update=auto_update,
+        color_mode=color_mode,
+    )
 
     # Fallback to git2svn.defaultRange if ref1 is omitted
     ref1 = getattr(args, "ref1", None)
