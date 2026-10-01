@@ -79,6 +79,9 @@ classDiagram
         +main()
         +build_parser()
     }
+    class Setup {
+        +run_setup()
+    }
     class Synchronizer {
         +stage()
         +stage_snapshot()
@@ -86,6 +89,10 @@ classDiagram
         +replay_continue()
         +replay_abort()
         +replay_skip()
+        +status()
+    }
+    class StatusReporter {
+        +report()
     }
     class GitRepo {
         +get_diff()
@@ -103,6 +110,12 @@ classDiagram
     class Patcher {
         +apply_diff()
     }
+    class TerminalColor {
+        +bold_cyan()
+        +bold_green()
+        +bold_yellow()
+        +bold_red()
+    }
     class EOL {
         +detect_file_eol()
         +normalize_file_eol()
@@ -116,19 +129,28 @@ classDiagram
     }
 
     CLI --> Synchronizer
+    CLI --> Setup
+    Synchronizer --> StatusReporter
     Synchronizer --> GitRepo
     Synchronizer --> SvnWorkspace
     Synchronizer --> Patcher
     Synchronizer --> EOL
     Synchronizer --> State
+    StatusReporter --> TerminalColor
+    StatusReporter --> GitRepo
+    StatusReporter --> SvnWorkspace
+    StatusReporter --> State
 ```
 
 ### 5.2 Level 2: Component Responsibilities
 
 | Component | File | Responsibility |
 | :--- | :--- | :--- |
-| **CLI Controller** | `git2svn/cli.py` | Argument parsing, help output, pre-flight target banner, command dispatch, and exit codes. |
+| **CLI Controller** | `git2svn/cli.py` | Argument parsing, help output, command dispatch, and exit code handling. |
+| **Setup Service** | `git2svn/setup.py` | Automated tracking branch detection, config discovery, and Git productivity alias registration. |
 | **Synchronizer Service** | `git2svn/core.py` | Orchestrates diff application, object extraction, EOL normalization, replay loop, and conflict lifecycle. |
+| **Status Reporter** | `git2svn/status.py` | Diagnostic inspection of Git, SVN working copy, conflict state, and pending commit queues. |
+| **Color Terminal** | `git2svn/colors.py` | ANSI styling, auto/always/never detection, and `NO_COLOR` standard compliance. |
 | **Git Adapter** | `git2svn/git.py` | Encapsulates `git` subprocess executions, ref parsing, name-status parsing, and object extraction. |
 | **SVN Adapter** | `git2svn/svn.py` | Encapsulates `svn` subprocess executions (`add`, `rm`, `commit`, `revert`, `info`, `status`). |
 | **Patcher** | `git2svn/patcher.py` | Encapsulates `git apply` with whitespace tolerance and reject file creation. |

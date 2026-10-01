@@ -11,6 +11,7 @@ from .core import Synchronizer
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
 from .patcher import Patcher
+from .setup import run_setup
 from .state import (
     clean_conflict_artifacts,
     clear_replay_state,
@@ -18,6 +19,7 @@ from .state import (
     load_replay_state,
     save_replay_state,
 )
+from .status import StatusReporter
 from .svn import SvnError, SvnLockError, SvnOutOfDateError, SvnWorkspace
 
 try:
@@ -45,6 +47,8 @@ __all__ = [
     "SvnOutOfDateError",
     "Patcher",
     "TerminalColor",
+    "StatusReporter",
+    "run_setup",
     "FileChange",
     "parse_ref_arguments",
     "parse_name_status",
