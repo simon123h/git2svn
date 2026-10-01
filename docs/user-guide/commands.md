@@ -203,7 +203,29 @@ git2svn status
 
 ---
 
-## 6. Structural Staging Mechanics
+## 6. Command: `clean`
+
+Resets the SVN workspace to a clean, unlocked state by reverting uncommitted changes, removing untracked conflict artifacts (`.rej` / `.orig`), deleting unversioned files/directories, and releasing SVN locks.
+
+```bash
+# Clean staged uncommitted changes, conflict files, and release locks:
+git2svn clean
+
+# Completely delete the local managed working copy (fresh re-checkout on next run):
+git2svn clean --purge
+```
+
+### What `clean` does:
+1. **Releases Locks:** Invokes `svn cleanup` to clear stale `.svn` working copy locks.
+2. **Reverts Changes:** Runs `svn revert -R .` to discard any staged or dirty modifications.
+3. **Removes Conflict Artifacts:** Scans and removes any leftover `.rej` or `.orig` patch files.
+4. **Removes Unversioned Files:** Identifies unversioned items (`?` in `svn status`) and deletes them.
+5. **Clears Replay State:** Deletes `.git2svn-replay.json` if a paused replay was abandoned.
+6. **Purge Mode (`--purge`):** Completely deletes the workspace directory (ideal for wiping a managed workspace in `.git/git2svn/svn_wc/`).
+
+---
+
+## 7. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 

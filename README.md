@@ -94,7 +94,11 @@ git2svn replay main..feature/login
 # 6. Resume replay after resolving conflicts
 git2svn replay --continue
 
-# 7. Or use the built-in Git aliases created during setup:
+# 7. Discard staged changes, remove conflict artifacts, or purge managed workspace
+git2svn clean
+git2svn clean --purge
+
+# 8. Or use the built-in Git aliases created during setup:
 git svn-push     # Replay trunk commits to SVN and fetch mirror
 git svn-pull     # Pull fresh SVN mirror commits & rebase local trunk
 git svn-status   # Run git2svn status
