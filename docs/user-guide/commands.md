@@ -150,9 +150,9 @@ git2svn setup /path/to/svn
    - `git config git2svn.svnDir <path/to/svn>`
    - `git config git2svn.defaultRange "<remote_branch>..<trunk_branch>"`
    - `git config pull.ff only` (prevents accidental merge commits when pulling)
-5. **Configures Productivity Aliases:**
-   - `git config alias.svn-push`: Replays trunk to SVN, triggers mirror sync, fetches SVN mirror, and fast-forwards trunk.
-   - `git config alias.svn-pull`: Triggers mirror sync, fetches SVN mirror, and fast-forwards trunk.
+5. **Configures Safe Productivity Aliases:**
+   - `git config alias.svn-push`: Replays trunk to SVN, fetches SVN mirror, and safely resets trunk *only* if `trunk` matches `svn-mirror/trunk` (guarded by `git diff --quiet`).
+   - `git config alias.svn-pull`: Fetches SVN mirror, fast-forwards trunk if clean, and automatically rebases local commits if unpushed work exists on trunk.
 
 ---
 

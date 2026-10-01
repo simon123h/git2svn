@@ -300,15 +300,20 @@ def handle_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
 
     # 5. Configure productivity aliases
     mirror_remote = detected_mirror.split("/")[0] if detected_mirror else "svn-mirror"
+    mirror_branch = detected_mirror or f"{mirror_remote}/trunk"
     trunk_name = detected_trunk or "trunk"
 
     push_script = (
-        f"!f() {{ git2svn replay && run-svn2git-sync && git fetch {mirror_remote} && "
-        f"git checkout {trunk_name} && git reset --hard {detected_mirror or f'{mirror_remote}/{trunk_name}'}; }}; f"
+        f"!f() {{ git2svn replay && git fetch {mirror_remote} && git checkout {trunk_name} && "
+        f"if git diff --quiet {trunk_name} {mirror_branch}; then "
+        f"git reset --hard {mirror_branch}; "
+        f"else echo '[git svn-push] Warning: {trunk_name} differs from {mirror_branch}. Not resetting.' >&2; fi; }}; f"
     )
     pull_script = (
-        f"!f() {{ run-svn2git-sync && git fetch {mirror_remote} && "
-        f"git checkout {trunk_name} && git reset --hard {detected_mirror or f'{mirror_remote}/{trunk_name}'}; }}; f"
+        f"!f() {{ git fetch {mirror_remote} && git checkout {trunk_name} && "
+        f"if ! git merge --ff-only {mirror_branch} 2>/dev/null; then "
+        f"echo '[git svn-pull] Fast-forward not possible (local commits on {trunk_name}). Rebasing onto {mirror_branch}...'; "
+        f"git rebase {mirror_branch}; fi; }}; f"
     )
 
     git_repo.set_config("alias.svn-push", push_script)
