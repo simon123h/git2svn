@@ -57,13 +57,20 @@ git config git2svn.svnDir /path/to/svn
 # 1. Stage a single Git commit into SVN for review (uncommitted)
 git2svn stage a1b2c3d4 -s /path/to/svn
 
-# 2. Squash an entire feature branch into an uncommitted SVN changeset
-git2svn stage main..feature/login
+# 2. Squash an entire feature branch into an uncommitted SVN changeset (with optional immediate diff preview)
+git2svn stage main..feature/login --diff
 
-# 3. Replay an entire feature branch commit-by-commit into SVN history
+# 3. Preview staged uncommitted changes in SVN
+git2svn diff
+git2svn diff --stat
+
+# 4. Inspect synchronization health and pending commits
+git2svn status
+
+# 5. Replay an entire feature branch commit-by-commit into SVN history
 git2svn replay main..feature/login
 
-# 4. Resume an interrupted replay after resolving conflicts
+# 6. Resume an interrupted replay after resolving conflicts
 git2svn replay --continue
 ```
 
@@ -72,13 +79,25 @@ git2svn replay --continue
 ## Architecture at a Glance
 
 ```mermaid
-flowchart TD
-    Git[Git Workspace] -->|git diff / name-status| Bridge[git2svn CLI]
-    Bridge -->|git apply or object extraction| SVN[SVN Working Copy]
-    Bridge -->|Smart CRLF / LF normalization| SVN
-    Bridge -->|svn add --parents / svn rm| SVN
-    SVN -->|Review & Manual svn commit| Upstream[(SVN Server)]
-    Bridge -.->|replay auto svn commit -F| Upstream
+flowchart LR
+    subgraph Local["Developer Workstation"]
+        direction LR
+        Git[("Git Workspace<br/>(feature branch)")]
+        
+        Tool["git2svn Engine<br/>• Diff & Patch<br/>• EOL Normalizer<br/>• Conflict Recovery"]
+        
+        SVN[("SVN Working Copy<br/>(trunk / branch)")]
+    end
+
+    Remote[("Remote SVN Server<br/>(Central Repository)")]
+
+    Git -->|"Reads commits & diffs"| Tool
+    
+    Tool -->|"stage: patch & stage (uncommitted)"| SVN
+    Tool -->|"replay: patch & commit each revision"| SVN
+    
+    SVN -->|"Manual commit (after stage review)"| Remote
+    SVN -->|"Atomic svn commit (during replay)"| Remote
 ```
 
 ---

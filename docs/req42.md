@@ -49,9 +49,13 @@ In legacy software development environments, enterprise Subversion (SVN) monorep
   * Detect and delete files present in SVN but missing in Git (`svn rm`).
   * Detect and add files present in Git but missing in SVN (`svn add`).
   * Overwrite modified files to match Git content, preserving target line-ending conventions.
+* **FR-2.7 (Staged Diff Preview `diff` & `--diff`):**
+  * `git2svn diff` MUST display an `svn diff` of uncommitted changes in the SVN workspace.
+  * `git2svn diff --stat` MUST display a compact diffstat summary of changed files.
+  * `git2svn stage --diff` (or `-p`) MUST immediately print the staged diff preview upon stage completion.
 
 ### FR-3: Stateful History Replay (`replay`)
-* **FR-3.1 (Always Commits):** `replay` MUST port commits sequentially, executing an atomic `svn commit` for each commit using the original Git commit message and author body.
+* **FR-3.1 (Always Commits & Metrics):** `replay` MUST port commits sequentially, executing an atomic `svn commit` for each commit using the original Git commit message and author body, reporting elapsed duration per commit and across the overall queue.
 * **FR-3.2 (Single Commit Cherry-pick):** `replay <commit>` MUST replay only that single commit and commit it to SVN.
 * **FR-3.3 (Linear History Enforcement):** `replay <ref1> <ref2>` MUST reject ranges containing merge commits and prompt the user to rebase to a linear history.
 * **FR-3.4 (Pre-flight Clean Check):** `replay` MUST verify the SVN workspace has no uncommitted modifications before beginning.

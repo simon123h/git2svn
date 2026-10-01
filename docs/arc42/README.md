@@ -85,6 +85,7 @@ classDiagram
     class Synchronizer {
         +stage()
         +stage_snapshot()
+        +diff()
         +replay()
         +replay_continue()
         +replay_abort()
@@ -104,6 +105,7 @@ classDiagram
         +stage_add()
         +stage_rm()
         +commit()
+        +diff()
         +revert_all()
         +get_versioned_files()
     }
