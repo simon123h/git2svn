@@ -50,6 +50,13 @@ write_to = "git2svn/_version.py"
 version_scheme = "no-guess-dev"
 local_scheme = "no-local-version"
 
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver"
+version_provider = "scm"
+
+
 
 [tool.ruff]
 line-length = 120
