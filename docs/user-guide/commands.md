@@ -1,6 +1,6 @@
-# Command Reference: `setup`, `stage` & `replay`
+# Command Reference: `stage`, `diff`, `replay`, `setup` & `status`
 
-This document details the usage, flags, and mechanics for `git2svn setup`, `git2svn stage`, and `git2svn replay`.
+This document details the usage, flags, and mechanics for all `git2svn` commands.
 
 
 ---
@@ -43,9 +43,30 @@ Compares the full tree of a target Git branch or commit against the SVN workspac
 git2svn stage feature/login --snapshot -s /path/to/svn
 ```
 
+### 1.5 Immediate Diff Preview (`--diff` / `-p`)
+Immediately preview the staged diff upon completion without needing to run a separate command:
+
+```bash
+git2svn stage main..feature/login --diff
+```
+
 ---
 
-## 2. Command: `replay`
+## 2. Command: `diff`
+
+Inspect uncommitted changes in the SVN workspace staged by `git2svn stage`.
+
+```bash
+# View full unified diff of staged changes:
+git2svn diff
+
+# View compact diffstat summary:
+git2svn diff --stat
+```
+
+---
+
+## 3. Command: `replay`
 
 Sequentially ports Git commits onto the SVN workspace, creating an **atomic `svn commit` for each** with its original Git commit message, author body, and timestamps.
 
