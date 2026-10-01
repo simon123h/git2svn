@@ -218,15 +218,15 @@ class GitRepo:
             return res.stdout.strip()
         return None
 
-    def get_diff(self, ref_spec: str) -> str:
-        """Get unified diff for the given reference specification."""
-        res = self.run_cmd(["diff", "--binary", ref_spec])
+    def get_diff(self, ref_spec: str) -> bytes:
+        """Get unified diff for the given reference specification as raw bytes."""
+        res = self.run_cmd_bytes(["diff", "--binary", ref_spec])
         return res.stdout
 
-    def get_diff_root(self, commit_hash: str) -> str:
-        """Get unified diff for a root commit."""
+    def get_diff_root(self, commit_hash: str) -> bytes:
+        """Get unified diff for a root commit as raw bytes."""
         empty_tree_hash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        res = self.run_cmd(["diff", "--binary", empty_tree_hash, commit_hash])
+        res = self.run_cmd_bytes(["diff", "--binary", empty_tree_hash, commit_hash])
         return res.stdout
 
     def get_name_status(self, ref_spec: str) -> List[FileChange]:
