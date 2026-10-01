@@ -6,16 +6,17 @@
 
 ## 1. Global Options & Environment
 
-All options can be specified either before or after subcommands:
+The recommended workflow is to run `git2svn setup <url-or-path>` once per repository. After setup, operational commands (`stage`, `replay`, `diff`, `status`) run directly without arguments:
 
 ```bash
-git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose] <command>
+git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [--svn-url <url>] [-n/--dry-run] [-v/--verbose] <command>
 ```
 
 | Option | Flag | Environment Variable | Git Config Key (`.git/config`) | Default | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `--version` | `-V` | — | — | — | Show program's version number and exit. |
-| `--svn-dir` | `-s` | `SVN_DIR` | `git2svn.svnDir` | None (required) | Path to the local Subversion working copy (`.svn` root). |
+| `--svn-dir` | `-s` | `SVN_DIR` | `git2svn.svnDir` | Managed `.git/git2svn/svn_wc` | Path to the local Subversion working copy (`.svn` root). Optional if configured or URL provided. |
+| `--svn-url` | — | `SVN_URL` | `git2svn.svnUrl` | None | SVN repository URL (managed checkout in `.git/git2svn/svn_wc/`). |
 | `--git-dir` | `-g` | — | — | Current Git root | Path to the local Git repository root. |
 | `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
 | `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
@@ -23,26 +24,25 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [-n/--dry-run] [-v/--verbose
 | `--no-update` | `-u / --update` | — | `git2svn.autoUpdate` | `True` | Run `svn update` after `replay` to bump local base revision to `HEAD` (enabled by default). |
 | `<ref1> [ref2]` | — | — | `git2svn.defaultRange` | None | Default revision or range (e.g. `svn-mirror/trunk..trunk`) when omitted from CLI. |
 
-### 1.1 Persisting Settings via `git config`
+### 1.1 Recommended Onboarding: `git2svn setup`
 
-To avoid typing `--svn-dir` or specifying commit ranges on every run, configure options directly in your repository's `.git/config`:
+Rather than configuring settings manually, run `git2svn setup` with your SVN repository URL or local working copy:
 
 ```bash
-# Configure SVN working copy path for this repository:
-git config git2svn.svnDir "C:/Projects/my-svn-checkout"
+# Option A: Automatic managed working copy in .git/git2svn/svn_wc:
+git2svn setup https://svn.example.com/repo/trunk
 
-# Configure default integration range:
-git config git2svn.defaultRange "svn-mirror/trunk..trunk"
-
-# Optional: Disable automatic 'svn update' if desired (defaults to true):
-git config git2svn.autoUpdate false
+# Option B: Existing local SVN working copy:
+git2svn setup /path/to/svn
 ```
 
+This automatically detects tracking branches, configures `git2svn.svnDir`, `git2svn.svnUrl`, `git2svn.defaultRange`, `pull.ff only`, and installs Git aliases (`git svn-push`, `git svn-pull`, `git svn-status`).
+
 #### Precedence Hierarchy:
-1. Explicit CLI arguments (`--svn-dir`, `--dry-run`, `--copy`, `--no-update` / `-u`)
-2. Environment variables (`SVN_DIR`)
+1. Explicit CLI arguments (`--svn-dir`, `--svn-url`, `--dry-run`, `--copy`, `--no-update` / `-u`)
+2. Environment variables (`SVN_DIR`, `SVN_URL`)
 3. Repository or global Git configuration (`git config git2svn.*`)
-4. System defaults
+4. System defaults (managed checkout at `.git/git2svn/svn_wc`)
 
 ---
 

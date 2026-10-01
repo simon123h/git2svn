@@ -92,6 +92,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="git2svn",
         description=(
             "Consolidated utility to synchronize Git revisions to an SVN workspace.\n\n"
+            "Recommended Workflow:\n"
+            "  1. Bootstrap once:   git2svn setup <SVN_URL_or_PATH>\n"
+            "                       (Automatically sets up managed workspace in .git/git2svn/svn_wc,\n"
+            "                        detects mirror tracking branches, and creates git aliases)\n"
+            "  2. Inspect state:    git2svn status\n"
+            "  3. Sync changes:     git2svn stage [ref]   or   git2svn replay [ref]\n"
+            "                       (No --svn-dir needed! Everything resolves automatically)\n\n"
             "Core Actions:\n"
             "  stage   NEVER commits. Applies Git changes to the SVN working copy (svn add/rm)\n"
             "          leaving files uncommitted for inspection, manual review, or squashing.\n"

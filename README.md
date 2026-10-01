@@ -10,7 +10,25 @@
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a>
 </p>
 
-A lightweight, zero-dependency Python 3 CLI utility to bridge local Git development workspaces with a Subversion (SVN) monorepo working copy. It provides two symmetrical, intuitive commands to either stage changes for manual review (`stage`) or sequentially commit them into SVN history (`replay`).
+A lightweight, zero-dependency Python 3 CLI utility to bridge local Git development workspaces with a Subversion (SVN) repository. It provides two symmetrical, intuitive commands to either stage changes for manual review (`stage`) or sequentially commit them into SVN history (`replay`).
+
+---
+
+## What `git2svn` Is (and What It Is Not)
+
+> [!IMPORTANT]
+> **Subversion is the primary source of truth.**
+> `git2svn` is designed for teams whose authoritative central repository is Subversion, but whose developers prefer the agility, local branching, rebasing, and tooling of Git.
+
+### ✅ What `git2svn` is designed for:
+- **Complementing an existing `svn2git` mirror:** You have an automated or incremental SVN-to-Git mirror (e.g. via `all-fast-export`, `subgit`, or an internal sync job) pulling SVN revisions into a tracking branch (such as `origin/svn-mirror/trunk` or `mirror/trunk`). `git2svn` serves as the **reverse gateway**, letting you replay your local feature branches cleanly back into SVN.
+- **Local Git freedom with an SVN backend:** Work locally with Git branches, stashes, and interactive rebases, then ship clean changesets to SVN with zero manual copy-pasting.
+- **Safe, staged inspection (`stage`):** Reviewing complex diffs or running pre-commit checks in TortoiseSVN before changes touch the SVN server.
+- **Sequential commit porting (`replay`):** Porting multi-commit PRs into SVN with original commit messages and conflict pause-and-resume control.
+
+### ❌ What `git2svn` is NOT designed for:
+- **It is NOT an autonomous full-mirror / bidirectional replication tool:** `git2svn` does not automatically track arbitrary Git tags, merge trees, or multi-branch mappings across repositories. Git history should be strictly linear before replaying to SVN.
+- **It is NOT intended for Git-as-master workflows:** If Git is your authoritative source of truth and you merely want to mirror everything into a passive SVN replica without human interaction, use a dedicated continuous migration daemon like SubGit.
 
 ---
 
@@ -48,31 +66,41 @@ cd git2svn
 python3 -m git2svn --help
 ```
 
-### Basic Commands
+### Workflow & Basic Commands
+
+`git2svn` is designed so you **bootstrap once** with `setup`, after which all synchronization commands run cleanly without needing `--svn-dir` or `--svn-url`:
 
 ```bash
-# Optional: Set default SVN path in your Git repository so you don't need -s on every command
-git config git2svn.svnDir /path/to/svn
+# 1. Bootstrap once in your Git repository (URL or local path)
+#    This automatically checks out a managed SVN copy into .git/git2svn/svn_wc,
+#    detects mirror tracking branches, and configures convenient git aliases.
+git2svn setup https://svn.example.com/repo/trunk
+# (or with an existing local checkout: git2svn setup /path/to/svn)
 
-# 1. Stage a single Git commit into SVN for review (uncommitted)
-git2svn stage a1b2c3d4 -s /path/to/svn
+# 2. Check synchronization health and pending commits
+git2svn status
 
-# 2. Squash an entire feature branch into an uncommitted SVN changeset (with optional immediate diff preview)
+# 3. Stage a single commit or squash an entire branch (uncommitted for review)
+git2svn stage a1b2c3d4
 git2svn stage main..feature/login --diff
 
-# 3. Preview staged uncommitted changes in SVN
+# 4. Preview uncommitted staged changes in SVN
 git2svn diff
 git2svn diff --stat
-
-# 4. Inspect synchronization health and pending commits
-git2svn status
 
 # 5. Replay an entire feature branch commit-by-commit into SVN history
 git2svn replay main..feature/login
 
-# 6. Resume an interrupted replay after resolving conflicts
+# 6. Resume replay after resolving conflicts
 git2svn replay --continue
+
+# 7. Or use the built-in Git aliases created during setup:
+git svn-push     # Replay trunk commits to SVN and fetch mirror
+git svn-pull     # Pull fresh SVN mirror commits & rebase local trunk
+git svn-status   # Run git2svn status
 ```
+
+*(Note: Advanced users or CI/CD scripts can still pass `--svn-dir <path>` or `--svn-url <url>` to override the configured workspace on any command).*
 
 ---
 
