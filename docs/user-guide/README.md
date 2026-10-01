@@ -21,8 +21,7 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [--svn-url <url>] [-n/--dry-
 | `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
 | `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
 | `--copy` | — | — | `git2svn.copy` | `False` | Extract exact binary snapshots directly from Git object DB. |
-| `--no-update` | `-u / --update` | — | `git2svn.autoUpdate` | `True` | Run `svn update` after `replay` to bump local base revision to `HEAD` (enabled by default). |
-| `<ref1> [ref2]` | — | — | `git2svn.defaultRange` | None | Default revision or range (e.g. `svn-mirror/trunk..trunk`) when omitted from CLI. |
+| `<ref1> [ref2]` | — | — | `git2svn.defaultRange` | None | Default revision or range (e.g. `origin/trunk..trunk` or `svn-mirror/trunk..trunk`) when omitted from CLI. |
 
 ### 1.1 Recommended Onboarding: `git2svn setup`
 

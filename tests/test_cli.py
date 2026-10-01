@@ -137,6 +137,51 @@ class TestCli(unittest.TestCase):
             res = git2svn.main(["--git-dir", str(git_dir), "setup"])
             self.assertEqual(res, 1)
 
+    def test_setup_detects_origin_remote(self):
+        """Verify git2svn setup detects origin/trunk and creates origin-based aliases."""
+        svn_dir = self.path / "origin_fake_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        git_dir = self.path / "origin_fake_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "trunk"], cwd=git_dir, check=True, capture_output=True)
+        (git_dir / "README.md").write_text("hello")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/trunk", "HEAD"],
+            cwd=git_dir,
+            check=True,
+        )
+
+        res = git2svn.main(["--git-dir", str(git_dir), "setup", str(svn_dir)])
+        self.assertEqual(res, 0)
+
+        git_repo = git2svn.GitRepo(git_dir)
+        self.assertEqual(git_repo.get_config("git2svn.defaultRange"), "origin/trunk..trunk")
+        self.assertIn("git fetch origin", git_repo.get_config("alias.svn-pull"))
+
+    def test_setup_prints_tip_when_no_mirror_detected(self):
+        """Verify git2svn setup prints an informative tip when no remote mirror branch is found."""
+        svn_dir = self.path / "tip_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        git_dir = self.path / "tip_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("sys.stdout", new=io.StringIO()) as fake_out:
+            res = git2svn.main(["--git-dir", str(git_dir), "setup", str(svn_dir)])
+            self.assertEqual(res, 0)
+            output = fake_out.getvalue()
+            self.assertIn("Tip: No remote mirror branch", output)
+            self.assertIn("git remote add origin", output)
+
     def test_setup_invalid_svn_dir(self):
         """Verify setup fails with exit code 1 when path is not an SVN working copy."""
         not_svn = self.path / "not_svn"

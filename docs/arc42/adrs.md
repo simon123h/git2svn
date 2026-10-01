@@ -69,10 +69,10 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
 
 ---
 
-### ADR-10: Optional Post-Replay Working Copy Update (`--update` / `git2svn.autoUpdate`)
-* **Context:** Subversion's mixed-revision working copy design leaves the local root revision behind `HEAD` after commits, hiding new revisions from `svn log` until `svn update` is run.
-* **Decision:** Provide an opt-in `-u` / `--update` flag and `git2svn.autoUpdate` setting to trigger `svn update` upon successful replay completion.
-* **Consequences:** Keeps local working copy base at `HEAD` while allowing users on massive remote SVN repositories to avoid extra network latency.
+### ADR-10: Mandatory Working Copy Updates (Pre and Post Operations)
+* **Context:** Subversion's mixed-revision working copy design leaves the local root revision behind `HEAD` after commits, hiding new revisions from `svn log` until `svn update` is run. Furthermore, in managed working copy environments (`.git/git2svn/svn_wc/`), staging or replaying against an out-of-date base revision leads to catastrophic `svn: E155015: Item is out of date` conflicts.
+* **Decision:** Treat `svn update` as a mandatory correctness invariant rather than an optional configuration setting. `git2svn` automatically updates the working copy prior to staging or replaying (to align against remote `HEAD`), and automatically updates the working copy upon successful replay completion. The `--no-update` flag and `git2svn.autoUpdate` config have been removed to eliminate unsafe partial-revision states.
+* **Consequences:** Guarantees atomic correctness and eliminates out-of-date collisions across multi-commit workflows.
 
 ---
 

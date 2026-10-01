@@ -354,14 +354,14 @@ class TestSynchronizer(unittest.TestCase):
         self.assertIn(["update"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_replay_with_no_update_flag(self, mock_svn_cmd):
-        """Verify git2svn replay --no-update disables svn update."""
+    def test_replay_always_runs_svn_update(self, mock_svn_cmd):
+        """Verify git2svn replay always runs svn update before and after execution."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        f = self.git_path / "no_update_test.txt"
-        f.write_text("no update test\n")
+        f = self.git_path / "mandatory_update_test.txt"
+        f.write_text("mandatory update test\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "no update test"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "mandatory update test"], cwd=self.git_path, check=True)
         commit_hash = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
         ).stdout.strip()
@@ -373,25 +373,24 @@ class TestSynchronizer(unittest.TestCase):
                 "--svn-dir",
                 str(self.svn_path),
                 "replay",
-                "--no-update",
                 commit_hash,
             ]
         )
         self.assertEqual(code, 0)
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertNotIn(["update"], called_args)
+        update_calls = [c for c in called_args if c == ["update"]]
+        # Should be called before applying commits and after replay finishes
+        self.assertGreaterEqual(len(update_calls), 2)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_replay_with_git_config_auto_update_disabled(self, mock_svn_cmd):
-        """Verify git config git2svn.autoUpdate false disables svn update on replay."""
+    def test_stage_runs_svn_update_before_staging(self, mock_svn_cmd):
+        """Verify git2svn stage runs svn update before staging changes."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
-        subprocess.run(["git", "config", "git2svn.autoUpdate", "false"], cwd=self.git_path, check=True)
-
-        f = self.git_path / "config_disabled_update.txt"
-        f.write_text("config disabled\n")
+        f = self.git_path / "stage_update_test.txt"
+        f.write_text("stage update test\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "config disabled"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "stage update test"], cwd=self.git_path, check=True)
         commit_hash = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
         ).stdout.strip()
@@ -402,13 +401,13 @@ class TestSynchronizer(unittest.TestCase):
                 str(self.git_path),
                 "--svn-dir",
                 str(self.svn_path),
-                "replay",
+                "stage",
                 commit_hash,
             ]
         )
         self.assertEqual(code, 0)
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        self.assertNotIn(["update"], called_args)
+        self.assertIn(["update"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_replay_with_git_config_default_range(self, mock_svn_cmd):

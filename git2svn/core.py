@@ -33,14 +33,12 @@ class Synchronizer:
         svn_workspace: SvnWorkspace,
         patcher: Patcher,
         dry_run: bool = False,
-        auto_update: bool = False,
         color_mode: str = "auto",
     ):
         self.git = git_repo
         self.svn = svn_workspace
         self.patcher = patcher
         self.dry_run = dry_run
-        self.auto_update = auto_update
         self.color = TerminalColor(color_mode)
 
     def show_identity_banner(self, target_ref_spec: str) -> None:
@@ -78,6 +76,9 @@ class Synchronizer:
             target_ref = end_ref if not is_single and end_ref else start_or_commit
             self.stage_snapshot(target_ref)
             return
+
+        if not self.dry_run and self.svn.is_clean():
+            self.svn.update()
 
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
         target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
@@ -231,6 +232,9 @@ class Synchronizer:
                 "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
             )
 
+        if not self.dry_run:
+            self.svn.update()
+
         if is_single:
             commit_hash = start_or_commit
             logger.info("Replaying single commit %s", commit_hash)
@@ -303,8 +307,7 @@ class Synchronizer:
         else:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay completed successfully! All %d commits applied.", total)
-            if self.auto_update:
-                self.svn.update()
+            self.svn.update()
 
     def replay_abort(self) -> None:
         """Abort in-progress replay and revert uncommitted changes."""
@@ -417,8 +420,7 @@ class Synchronizer:
             total_commits,
             total_elapsed,
         )
-        if self.auto_update:
-            self.svn.update()
+        self.svn.update()
 
     def _patch_and_stage_commit(self, commit_hash: str) -> None:
         """Extract diff for a single commit, apply using git apply, and stage in SVN."""

@@ -178,22 +178,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_replay.add_argument("ref1", nargs="?", default=None, help="Commit hash or start ref")
     parser_replay.add_argument("ref2", nargs="?", default=None, help="End ref if range given as two arguments")
-    update_group = parser_replay.add_mutually_exclusive_group()
-    update_group.add_argument(
-        "-u",
-        "--update",
-        dest="update",
-        action="store_true",
-        default=argparse.SUPPRESS,
-        help="Run 'svn update' upon successful replay completion (enabled by default)",
-    )
-    update_group.add_argument(
-        "--no-update",
-        dest="update",
-        action="store_false",
-        default=argparse.SUPPRESS,
-        help="Disable automatic 'svn update' upon successful replay completion",
-    )
     action_group = parser_replay.add_mutually_exclusive_group()
     action_group.add_argument(
         "--continue",
@@ -294,7 +278,6 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         diff=False,
         stat=False,
         replay_action=None,
-        update=None,
     )
     return parser.parse_args(argv, namespace=namespace)
 
@@ -387,15 +370,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         if config_copy is not None:
             use_copy = config_copy
 
-    # auto_update defaults to True unless CLI --no-update or git config git2svn.autoUpdate false
-    auto_update = getattr(args, "update", None)
-    if auto_update is None:
-        config_update = git_repo.get_config_bool("git2svn.autoUpdate")
-        if config_update is not None:
-            auto_update = config_update
-        else:
-            auto_update = True
-
     svn_workspace = SvnWorkspace(svn_dir, dry_run=dry_run)
     if not svn_workspace.is_valid_workspace() and not dry_run:
         print(f"Error: '{svn_dir}' does not appear to be an SVN working copy (no .svn found).", file=sys.stderr)
@@ -407,7 +381,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         svn_workspace,
         patcher,
         dry_run=dry_run,
-        auto_update=auto_update,
         color_mode=color_mode,
     )
 

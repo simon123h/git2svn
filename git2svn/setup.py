@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from .git import GitRepo
 from .svn import (
@@ -96,7 +96,19 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     # 3. Auto-detect remote tracking mirror branch
     remote_branches = git_repo.get_remote_branches()
     detected_mirror: Optional[str] = None
-    preferred_remotes = ["svn-mirror/trunk", "origin/trunk", "svn/trunk", "mirror/trunk"]
+    # Preferred mirror candidates, checking svn-mirror first, then origin
+    target_names = [detected_trunk] if detected_trunk else ["trunk", "main", "master"]
+    preferred_remotes: List[str] = []
+    for t_name in target_names:
+        preferred_remotes.extend(
+            [
+                f"svn-mirror/{t_name}",
+                f"origin/{t_name}",
+                f"svn/{t_name}",
+                f"mirror/{t_name}",
+            ]
+        )
+
     for pref in preferred_remotes:
         if pref in remote_branches:
             detected_mirror = pref
@@ -106,8 +118,8 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
         # Check for remote branch matching <remote>/<detected_trunk>
         candidates = [b for b in remote_branches if b.endswith(f"/{detected_trunk}")]
         if candidates:
-            # Prefer svn-mirror if present
-            svn_cand = [c for c in candidates if "svn" in c.lower() or "mirror" in c.lower()]
+            # Prefer svn/mirror, fallback to origin, then first candidate
+            svn_cand = [c for c in candidates if any(k in c.lower() for k in ("svn", "mirror", "origin"))]
             detected_mirror = svn_cand[0] if svn_cand else candidates[0]
 
     # 4. Apply Git configuration
@@ -124,8 +136,20 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
         git_repo.set_config("git2svn.defaultRange", default_range)
 
     # 5. Configure productivity aliases
-    mirror_remote = detected_mirror.split("/")[0] if detected_mirror else "svn-mirror"
-    mirror_branch = detected_mirror or f"{mirror_remote}/trunk"
+    mirror_remote = (
+        detected_mirror.split("/")[0]
+        if detected_mirror
+        else (
+            "origin"
+            if "origin/HEAD"
+            in git_repo.run_cmd(
+                ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"], check=False
+            ).stdout
+            or any(b.startswith("origin/") for b in remote_branches)
+            else "svn-mirror"
+        )
+    )
+    mirror_branch = detected_mirror or f"{mirror_remote}/{detected_trunk or 'trunk'}"
     trunk_name = detected_trunk or "trunk"
 
     push_script = (
@@ -153,9 +177,19 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     if default_range:
         print(f"  git2svn.defaultRange= {default_range}")
     else:
-        print("  git2svn.defaultRange= (not set; could not detect mirror branch)")
+        print("  git2svn.defaultRange= (not set; could not detect remote mirror branch)")
     print("  pull.ff             = only")
     print(f"  alias.svn-push      = {push_script}")
     print(f"  alias.svn-pull      = {pull_script}")
     print(f"  alias.svn-status    = {status_script}")
+
+    if not detected_mirror:
+        print(
+            "\nTip: No remote mirror branch (e.g. 'origin/trunk' or 'svn-mirror/trunk') was detected.\n"
+            "     If you maintain an incremental SVN-to-Git mirror (e.g. svn2git), add it as a git remote:\n"
+            "       git remote add origin <mirror-git-url>  # or: git remote add svn-mirror <mirror-git-url>\n"
+            "       git fetch origin\n"
+            "       git2svn setup\n"
+            "     This enables automated 'git svn-pull' and 'git svn-push' fast-forward resets."
+        )
     return 0

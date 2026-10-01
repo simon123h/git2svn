@@ -186,9 +186,9 @@ class TestGit2SvnE2E(unittest.TestCase):
         base_file.write_text("v2\n", encoding="utf-8")
         target_hash = self._git_commit("bump to v2")
 
-        # Run replay with -u / --update
+        # Run replay (always updates automatically)
         exit_code = cli_main(
-            ["replay", "-u", f"{base_hash}..{target_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+            ["replay", f"{base_hash}..{target_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
         )
         self.assertEqual(exit_code, 0)
 

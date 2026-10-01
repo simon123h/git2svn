@@ -85,20 +85,12 @@ Replay each commit in the range sequentially into SVN history:
 git2svn replay main..feature/login -s /path/to/svn
 ```
 
-### 2.3 Automatic Working Copy Base Revision Update (`--no-update`)
-Subversion working copies operate with **mixed revisions**: when `git2svn replay` commits revisions to the SVN repository, only touched files are updated locally while the working copy base revision remains pegged at the previous revision.
+### 2.3 Automatic Working Copy Base Alignment
+Subversion working copies operate with **mixed revisions**: when `git2svn replay` commits revisions to the SVN repository, only touched files are updated locally while the working copy base revision remains pegged at the previous revision. Furthermore, staging or replaying against a stale base revision causes `svn: E155015: Item is out of date` conflicts.
 
-To keep your working copy aligned at `HEAD` and ready for subsequent mirror synchronizations, **`git2svn replay` automatically runs `svn update` upon completion by default**.
-
-If you need to skip the automatic update (e.g. over high-latency connections), pass `--no-update`:
-```bash
-git2svn replay --no-update main..feature/login -s /path/to/svn
-```
-
-You can also disable automatic updates persistently for a repository via `.git/config`:
-```bash
-git config git2svn.autoUpdate false
-```
+To guarantee atomic correctness:
+- **`git2svn` automatically updates the working copy before staging or replaying**, ensuring your patches apply against the latest remote `HEAD`.
+- **`git2svn replay` automatically updates the working copy upon completion**, ensuring the working copy base revision is cleanly bumped to `HEAD` for immediate subsequent operations or mirror pulls.
 
 ---
 
