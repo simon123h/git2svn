@@ -261,13 +261,23 @@ class Synchronizer:
             )
 
         # 2. Commit the resolved changes for the interrupted commit
+        pad_width = len(str(total))
+        first_line = current_msg.splitlines()[0] if current_msg else ""
+        progress_prefix = f"[{completed + 1:>{pad_width}}/{total}] Resolving {current_commit[:8]}: {first_line}"
+
         if not self.svn.is_clean():
             logger.info("Committing resolved commit %s to SVN...", current_commit)
+            sys.stdout.write(f"{progress_prefix}... ")
+            sys.stdout.flush()
             self.svn.commit(current_msg)
+            sys.stdout.write("OK\n")
+            sys.stdout.flush()
         else:
             logger.info(
                 "No changes in SVN workspace to commit for %s (commit resolved as empty or skipped).", current_commit
             )
+            sys.stdout.write(f"{progress_prefix}... SKIPPED (no changes)\n")
+            sys.stdout.flush()
 
         completed += 1
         logger.info("Commit %s (%d/%d) resolved and committed.", current_commit, completed, total)
@@ -319,19 +329,35 @@ class Synchronizer:
 
     def _execute_replay_queue(self, commits: List[str], total_commits: int, start_index: int) -> None:
         """Execute a list of commits sequentially, catching conflicts and persisting state."""
+        pad_width = len(str(total_commits))
         for idx, commit_hash in enumerate(commits, start=start_index):
             commit_msg = self.git.get_commit_message(commit_hash)
             first_line = commit_msg.splitlines()[0] if commit_msg else ""
-            logger.info("[%d/%d] Applying commit %s: %s", idx, total_commits, commit_hash[:8], first_line)
+            progress_prefix = f"[{idx:>{pad_width}}/{total_commits}] Applying {commit_hash[:8]}: {first_line}"
+            logger.info(progress_prefix)
+
+            # Interactive console progress output
+            if sys.stdout.isatty():
+                sys.stdout.write(f"\r\033[K{progress_prefix}... ")
+                sys.stdout.flush()
+            else:
+                sys.stdout.write(f"{progress_prefix}... ")
+                sys.stdout.flush()
 
             try:
                 self._patch_and_stage_commit(commit_hash)
                 self.svn.commit(commit_msg)
+                sys.stdout.write("OK\n")
+                sys.stdout.flush()
             except SvnError:
+                sys.stdout.write("FAILED (SVN error)\n")
+                sys.stdout.flush()
                 # SVN operational failure (e.g. working copy locked, out-of-date, collision)
                 # Re-raise directly to display actionable SVN resolution hints
                 raise
             except Exception:
+                sys.stdout.write("CONFLICT\n")
+                sys.stdout.flush()
                 remaining = commits[idx - start_index + 1 :]
                 state_data = {
                     "state": "CONFLICT_PAUSED",

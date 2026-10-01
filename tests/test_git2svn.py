@@ -668,6 +668,34 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual((self.svn_path / "trunk_feat.txt").read_text(), "trunk feat\n")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_progress_output(self, mock_svn_cmd):
+        """Verify git2svn replay outputs formatted progress indicators with commit title and OK status."""
+        import io
+
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        base_file = self.git_path / "prog_base.txt"
+        base_file.write_text("prog base\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "prog base"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        commit_file = self.git_path / "prog_feat.txt"
+        commit_file.write_text("prog feat\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "feat: progress indicator"], cwd=self.git_path, check=True)
+        feat_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            self.sync_mgr.replay(base_hash, feat_hash)
+            output = mock_stdout.getvalue()
+            self.assertIn(f"[1/1] Applying {feat_hash[:8]}: feat: progress indicator... OK", output)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_stage_with_git_config_default_range(self, mock_svn_cmd):
         """Verify git2svn stage with no ref arguments falls back to git2svn.defaultRange."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
