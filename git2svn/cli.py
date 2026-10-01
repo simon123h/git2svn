@@ -437,6 +437,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 use_copy=use_copy,
                 snapshot=is_snapshot,
             )
+            managed_dir = get_default_managed_svn_dir(git_repo.repo_dir)
+            if svn_dir.resolve() == managed_dir.resolve():
+                print(f"Working copy : {svn_dir}")
+                print("Tip: Run 'git2svn diff' (or 'git2svn status') to inspect uncommitted changes.")
+
             if getattr(args, "diff", False):
                 diff_output = sync_mgr.diff()
                 if diff_output.strip():

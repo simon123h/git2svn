@@ -473,6 +473,34 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_sync.purge_workspace.assert_called_once()
 
+    def test_cli_stage_managed_working_copy_prints_inspection_hint(self):
+        """Verify git2svn stage outputs working copy path and inspection tip when using managed workspace."""
+        git_dir = self.path / "managed_stage_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=git_dir, check=True, capture_output=True)
+        (git_dir / "file.txt").write_text("hello")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        git_repo = git2svn.GitRepo(git_dir)
+        git_repo.set_config("git2svn.svnUrl", "https://svn.example.com/trunk")
+        managed_dir = git2svn.svn.get_default_managed_svn_dir(git_dir)
+        managed_dir.mkdir(parents=True, exist_ok=True)
+        (managed_dir / ".svn").mkdir()
+
+        with (
+            patch("git2svn.cli.Synchronizer") as mock_sync_cls,
+            patch("sys.stdout", new=io.StringIO()) as fake_out,
+        ):
+            code = git2svn.main(["--git-dir", str(git_dir), "stage", "HEAD"])
+            self.assertEqual(code, 0)
+            mock_sync_cls.return_value.stage.assert_called_once()
+            output = fake_out.getvalue()
+            self.assertIn(f"Working copy : {managed_dir}", output)
+            self.assertIn("Tip: Run 'git2svn diff' (or 'git2svn status') to inspect uncommitted changes.", output)
+
 
 if __name__ == "__main__":
     unittest.main()
