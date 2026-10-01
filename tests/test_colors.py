@@ -68,10 +68,10 @@ class TestTerminalColor(unittest.TestCase):
         self.assertIn("\033[", color_always.paused_badge())
 
         color_never = git2svn.TerminalColor(mode="never")
-        self.assertEqual(color_never.info_badge(), "[INFO]")
+        self.assertEqual(color_never.info_badge(), "[INFO]  ")
         self.assertEqual(color_never.target_badge(), "[TARGET]")
-        self.assertEqual(color_never.warn_badge(), "[WARN]")
-        self.assertEqual(color_never.error_badge(), "[ERROR]")
+        self.assertEqual(color_never.warn_badge(), "[WARN]  ")
+        self.assertEqual(color_never.error_badge(), "[ERROR] ")
         self.assertEqual(color_never.paused_badge(), "[PAUSED]")
 
     def test_colored_log_formatter(self):
@@ -102,10 +102,10 @@ class TestTerminalColor(unittest.TestCase):
 
         # Mode: never
         fmt_never = git2svn.ColoredLogFormatter(git2svn.TerminalColor(mode="never"))
-        self.assertEqual(fmt_never.format(record_info), "[INFO] info message")
-        self.assertEqual(fmt_never.format(record_warn), "[WARNING] warn message")
-        self.assertEqual(fmt_never.format(record_err), "[ERROR] err message")
-        self.assertEqual(fmt_never.format(record_debug), "[DEBUG] debug message")
+        self.assertEqual(fmt_never.format(record_info), "[INFO]   info message")
+        self.assertEqual(fmt_never.format(record_warn), "[WARN]   warn message")
+        self.assertEqual(fmt_never.format(record_err), "[ERROR]  err message")
+        self.assertEqual(fmt_never.format(record_debug), "[DEBUG]  debug message")
 
 
 if __name__ == "__main__":

@@ -104,16 +104,16 @@ class TerminalColor:
     def error(self, text: str = "Error") -> str:
         return self.bold_red(f"✖ {text}")
 
-    def info_badge(self, text: str = "[INFO]") -> str:
+    def info_badge(self, text: str = "[INFO]  ") -> str:
         return self.bold_cyan(text)
 
     def target_badge(self, text: str = "[TARGET]") -> str:
         return self.bold_cyan(text)
 
-    def warn_badge(self, text: str = "[WARN]") -> str:
+    def warn_badge(self, text: str = "[WARN]  ") -> str:
         return self.bold_yellow(text)
 
-    def error_badge(self, text: str = "[ERROR]") -> str:
+    def error_badge(self, text: str = "[ERROR] ") -> str:
         return self.bold_red(text)
 
     def paused_badge(self, text: str = "[PAUSED]") -> str:
@@ -121,7 +121,7 @@ class TerminalColor:
 
 
 class ColoredLogFormatter(logging.Formatter):
-    """Custom logging formatter that colorizes log level prefixes using TerminalColor."""
+    """Custom logging formatter that colorizes and aligns log level prefixes using TerminalColor."""
 
     def __init__(self, color: TerminalColor):
         super().__init__()
@@ -130,18 +130,22 @@ class ColoredLogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         levelname = record.levelname
         msg = record.getMessage()
-        if not self.color.enabled:
-            return f"[{levelname}] {msg}"
 
+        # Format prefix aligned to 8 chars: e.g. [INFO]  , [WARN]  , [ERROR]
         if levelname == "INFO":
-            badge = self.color.info_badge("[INFO]")
+            raw_tag = "[INFO]  "
+            badge = self.color.info_badge(raw_tag) if self.color.enabled else raw_tag
         elif levelname in ("WARNING", "WARN"):
-            badge = self.color.warn_badge(f"[{levelname}]")
+            raw_tag = "[WARN]  "
+            badge = self.color.warn_badge(raw_tag) if self.color.enabled else raw_tag
         elif levelname in ("ERROR", "CRITICAL"):
-            badge = self.color.error_badge(f"[{levelname}]")
+            raw_tag = "[ERROR] "
+            badge = self.color.error_badge(raw_tag) if self.color.enabled else raw_tag
         elif levelname == "DEBUG":
-            badge = self.color.dim(f"[{levelname}]")
+            raw_tag = "[DEBUG] "
+            badge = self.color.dim(raw_tag) if self.color.enabled else raw_tag
         else:
-            badge = f"[{levelname}]"
+            raw_tag = f"[{levelname}]".ljust(8)
+            badge = raw_tag
 
         return f"{badge} {msg}"
