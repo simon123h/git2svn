@@ -73,3 +73,15 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
 * **Context:** Subversion's mixed-revision working copy design leaves the local root revision behind `HEAD` after commits, hiding new revisions from `svn log` until `svn update` is run.
 * **Decision:** Provide an opt-in `-u` / `--update` flag and `git2svn.autoUpdate` setting to trigger `svn update` upon successful replay completion.
 * **Consequences:** Keeps local working copy base at `HEAD` while allowing users on massive remote SVN repositories to avoid extra network latency.
+
+---
+
+### ADR-11: No Author/Metadata Preservation or Date Spoofing
+* **Context:** In Git, commits carry distinct author and committer names, emails, and historical timestamps. Subversion tracks revision properties (`svn:author`, `svn:date`) which are either immutable by default or require custom server-side hook scripts (`pre-revprop-change`) that are typically locked down in enterprise SVN deployments. Modifying revision properties or spoofing commit timestamps/authors can create security, audit, and traceability concerns, in addition to introducing server-dependent replay failures.
+* **Decision:** Explicitly reject author spoofing, date manipulation, or artificial metadata rewriting in `git2svn`. All replayed commits are committed using the active SVN working copy user credentials and the current server timestamp. Original Git commit messages are preserved verbatim, but author identity and commit time in SVN remain authoritative to the person running the tool at the time of execution.
+* **Consequences:**
+  - Guarantees compatibility with all SVN servers out of the box without requiring `pre-revprop-change` server hook privileges.
+  - Maintains strict organizational accountability: the committer who pushes the changes to SVN is always the verified SVN user.
+  - Avoids temporal inconsistencies in SVN repositories where revisions must strictly increase in time.
+  - Keeps the codebase lightweight and free of brittle revision-property manipulation logic.
+
