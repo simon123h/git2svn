@@ -153,6 +153,13 @@ class SvnWorkspace:
             raise parse_svn_error(res.stderr, "check status", self.workspace_dir)
         return not bool(res.stdout.strip())
 
+    def get_status_summary(self) -> List[str]:
+        """Return lines of uncommitted changes from 'svn status -q'."""
+        res = self.run_cmd(["status", "-q"], check=False)
+        if res.returncode != 0:
+            raise parse_svn_error(res.stderr, "check status", self.workspace_dir)
+        return [line.rstrip() for line in res.stdout.splitlines() if line.strip()]
+
     def get_versioned_files(self) -> List[Path]:
         """
         Return list of all versioned file paths in the SVN workspace (relative to workspace_dir).

@@ -114,6 +114,9 @@ git config alias.svn-pull "!f() { \
         git rebase svn-mirror/trunk; \
     fi; \
 }; f"
+
+# 3. git svn-status: Inspects sync health, pending commits, and working tree states
+git config alias.svn-status "!git2svn status"
 ```
 
 ### Safety Features of These Aliases:
@@ -124,6 +127,9 @@ git config alias.svn-pull "!f() { \
 With these aliases configured alongside `git config git2svn.defaultRange "svn-mirror/trunk..trunk"`:
 
 ```bash
+# Check synchronization health, tree states, and pending commits:
+git svn-status
+
 # Pull latest SVN state into local Git trunk (fast-forward or rebase):
 git svn-pull
 

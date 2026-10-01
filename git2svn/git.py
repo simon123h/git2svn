@@ -187,12 +187,29 @@ class GitRepo:
             return branch if branch != "HEAD" else "HEAD (detached)"
         return "unknown"
 
+    def is_clean(self) -> bool:
+        """Check if Git working tree and index have no uncommitted changes."""
+        res = self.run_cmd(["status", "--porcelain"], check=False)
+        return not bool(res.stdout.strip())
+
     def get_head_commit(self) -> str:
         """Return the short hash of HEAD."""
         res = self.run_cmd(["rev-parse", "--short", "HEAD"], check=False)
         if res.returncode == 0:
             return res.stdout.strip()
         return "unknown"
+
+    def get_head_subject(self) -> str:
+        """Return the subject line of the HEAD commit."""
+        res = self.run_cmd(["log", "-1", "--format=%s", "HEAD"], check=False)
+        if res.returncode == 0:
+            return res.stdout.strip()
+        return ""
+
+    def ref_exists(self, ref: str) -> bool:
+        """Check whether a Git reference or revision expression resolves."""
+        res = self.run_cmd(["rev-parse", "--verify", "--quiet", ref], check=False)
+        return res.returncode == 0
 
     def get_commit_parent(self, commit_hash: str) -> Optional[str]:
         """Return the parent commit hash, or None if root commit."""

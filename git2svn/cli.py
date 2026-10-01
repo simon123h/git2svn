@@ -195,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Configure repository settings for git2svn on a fresh clone.\n"
             "Automatically detects local trunk and remote SVN mirror tracking branches,\n"
             "sets git2svn.svnDir, git2svn.defaultRange, git2svn.autoUpdate, pull.ff only,\n"
-            "and configures git alias.svn-push and alias.svn-pull."
+            "and configures git alias.svn-push, alias.svn-pull, and alias.svn-status."
         ),
     )
     parser_setup.add_argument(
@@ -205,6 +205,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="SVN_DIR",
         help="Path to SVN working copy (optional if already configured or set via --svn-dir)",
+    )
+
+    # status
+    subparsers.add_parser(
+        "status",
+        parents=[common_parser],
+        help="Inspect synchronization health, pending commits, and workspace state",
+        description=(
+            "Display current state of Git repository, SVN working copy, in-progress replay,\n"
+            "and pending commits in the configured defaultRange."
+        ),
     )
 
     return parser
@@ -315,9 +326,11 @@ def handle_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
         f"echo '[git svn-pull] Fast-forward not possible (local commits on {trunk_name}). Rebasing onto {mirror_branch}...'; "
         f"git rebase {mirror_branch}; fi; }}; f"
     )
+    status_script = "!git2svn status"
 
     git_repo.set_config("alias.svn-push", push_script)
     git_repo.set_config("alias.svn-pull", pull_script)
+    git_repo.set_config("alias.svn-status", status_script)
 
     print("Successfully configured git2svn:")
     print(f"  git2svn.svnDir      = {svn_dir_str}")
@@ -328,6 +341,7 @@ def handle_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
     print("  pull.ff             = only")
     print(f"  alias.svn-push      = {push_script}")
     print(f"  alias.svn-pull      = {pull_script}")
+    print(f"  alias.svn-status    = {status_script}")
     return 0
 
 
@@ -425,7 +439,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     sync_mgr = Synchronizer(git_repo, svn_workspace, patcher, dry_run=dry_run, auto_update=auto_update)
 
     # Fallback to git2svn.defaultRange if ref1 is omitted
-    ref1 = args.ref1
+    ref1 = getattr(args, "ref1", None)
     ref2 = getattr(args, "ref2", None)
     if not ref1 and args.command in ("stage", "replay"):
         # Replay actions (--continue, --abort, --skip) do not need ref1
@@ -470,6 +484,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                     return 1
                 sync_mgr.replay(ref1, ref2)
+        elif args.command == "status":
+            return sync_mgr.status()
         else:
             return 1
     except (SvnLockError, SvnOutOfDateError) as e:

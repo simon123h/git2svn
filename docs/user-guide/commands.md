@@ -153,10 +153,31 @@ git2svn setup /path/to/svn
 5. **Configures Safe Productivity Aliases:**
    - `git config alias.svn-push`: Replays trunk to SVN, fetches SVN mirror, and safely resets trunk *only* if `trunk` matches `svn-mirror/trunk` (guarded by `git diff --quiet`).
    - `git config alias.svn-pull`: Fetches SVN mirror, fast-forwards trunk if clean, and automatically rebases local commits if unpushed work exists on trunk.
+   - `git config alias.svn-status`: Inspects synchronization health, pending commits, and workspace state via `git2svn status`.
 
 ---
 
-## 5. Structural Staging Mechanics
+## 5. Command: `status`
+
+Inspects synchronization health, pending commits in `git2svn.defaultRange`, and working tree states across both Git and Subversion.
+
+```bash
+git2svn status
+```
+
+### What `status` reports:
+- **Git Workspace:** Active branch, latest commit hash & subject, and working tree cleanliness.
+- **SVN Working Copy:** Path, target SVN URL, base revision, cleanliness, and lock status.
+- **Synchronization Queue:** Configured `git2svn.defaultRange`, pending commit count & titles, and linear history validation (warns if merge commits exist).
+- **In-Progress Replay:** State of paused replays (if a conflict occurred), remaining commits, active `.rej` conflict files, and actionable recovery commands (`--continue`, `--abort`, `--skip`).
+
+### Exit Codes:
+- `0`: Workspace is clean, unlocked, and synchronization queue is valid.
+- `1`: SVN working copy is locked/dirty, replay is paused due to conflict, or merge commits violate linear history.
+
+---
+
+## 6. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 
