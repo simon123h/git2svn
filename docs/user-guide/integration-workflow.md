@@ -162,4 +162,23 @@ The repository's [`.githooks/pre-commit`](../../.githooks/pre-commit) hook autom
 [git2svn pre-commit hook] Please rebase your feature branch and use fast-forward: 'git merge --ff-only <branch>'
 ```
 
+---
+
+## 5. Mirror Protection Guard (Preventing Accidental `git push` to Mirror)
+
+In a Git-SVN workflow where a background daemon (like `svn2git`) mirrors SVN commits to Git, running `git push` directly to the mirrored tracking branch (e.g. `origin/trunk` or `svn-mirror/trunk`) causes Git history to diverge from SVN and breaks automated mirror synchronization.
+
+### Automated `pre-push` Hook
+`git2svn setup` automatically installs a safety guard into `.git/hooks/pre-push`.
+
+- **Protected Branch:** If you accidentally attempt to push directly to the mirror tracking branch (`trunk`, `main` on the mirror remote), Git immediately aborts the push:
+  ```text
+  [git2svn pre-push guard] ERROR: Direct push to 'origin/trunk' is blocked!
+  [git2svn pre-push guard] This branch is mirrored from SVN. Pushing directly causes svn2git to diverge.
+  [git2svn pre-push guard] To publish your changes to SVN, run:
+      git svn-push   (or: git2svn replay)
+  ```
+- **Feature Branches & PRs Allowed:** If your mirror remote is hosted on a platform like GitLab or GitHub where you create Merge Requests / Pull Requests, pushing feature branches (e.g. `git push origin feature/my-work`) or pushing to personal forks is completely unaffected and permitted.
+
+
 

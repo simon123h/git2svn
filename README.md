@@ -73,7 +73,8 @@ python3 -m git2svn --help
 ```bash
 # 1. Bootstrap once in your Git repository (URL or local path)
 #    This automatically checks out a managed SVN copy into .git/git2svn/svn_wc,
-#    detects mirror tracking branches, and configures convenient git aliases.
+#    detects mirror tracking branches, installs a pre-push guard against accidental pushes,
+#    and configures convenient git aliases.
 git2svn setup https://svn.example.com/repo/trunk
 # (or with an existing local checkout: git2svn setup /path/to/svn)
 

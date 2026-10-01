@@ -501,6 +501,84 @@ class TestCli(unittest.TestCase):
             self.assertIn(f"Working copy : {managed_dir}", output)
             self.assertIn("Tip: Run 'git2svn diff' (or 'git2svn status') to inspect uncommitted changes.", output)
 
+    def test_setup_installs_pre_push_hook(self):
+        """Verify git2svn setup installs pre-push hook guarding against push to mirror."""
+        svn_dir = self.path / "hook_fake_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        git_dir = self.path / "hook_fake_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "trunk"], cwd=git_dir, check=True, capture_output=True)
+        (git_dir / "file.txt").write_text("hello")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/trunk", "HEAD"],
+            cwd=git_dir,
+            check=True,
+        )
+
+        res = git2svn.main(["--git-dir", str(git_dir), "setup", str(svn_dir)])
+        self.assertEqual(res, 0)
+
+        hook_file = git_dir / ".git" / "hooks" / "pre-push"
+        self.assertTrue(hook_file.is_file())
+        hook_content = hook_file.read_text()
+        self.assertIn("# --- START GIT2SVN PRE-PUSH GUARD ---", hook_content)
+        self.assertIn('REMOTE_NAME="$1"', hook_content)
+        self.assertIn('if [ "$REMOTE_NAME" = "origin" ]; then', hook_content)
+        self.assertIn('if [ "$remote_ref" = "refs/heads/trunk" ]; then', hook_content)
+
+        # Ensure calling setup again idempotently updates rather than duplicates
+        res2 = git2svn.main(["--git-dir", str(git_dir), "setup", str(svn_dir)])
+        self.assertEqual(res2, 0)
+        self.assertEqual(hook_file.read_text().count("# --- START GIT2SVN PRE-PUSH GUARD ---"), 1)
+
+    def test_pre_push_hook_blocks_mirror_push(self):
+        """Verify that the generated pre-push hook script blocks push to origin/trunk but permits feature branches."""
+        git_dir = self.path / "hook_exec_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "trunk"], cwd=git_dir, check=True, capture_output=True)
+
+        git2svn.setup.install_pre_push_hook(git2svn.GitRepo(git_dir), "origin", "trunk")
+        hook_file = git_dir / ".git" / "hooks" / "pre-push"
+        self.assertTrue(hook_file.is_file())
+
+        # 1. Simulate pushing trunk to origin -> must exit 1 and output error
+        push_input = "refs/heads/trunk aaaa refs/heads/trunk bbbb\n"
+        proc_block = subprocess.run(
+            [str(hook_file), "origin", "https://github.com/example/repo.git"],
+            input=push_input,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(proc_block.returncode, 1)
+        self.assertIn("[git2svn pre-push guard] ERROR: Direct push to 'origin/trunk' is blocked!", proc_block.stderr)
+        self.assertIn("git svn-push", proc_block.stderr)
+
+        # 2. Simulate pushing a feature branch to origin -> must succeed (exit 0)
+        feature_input = "refs/heads/feature/login aaaa refs/heads/feature/login bbbb\n"
+        proc_allow_feature = subprocess.run(
+            [str(hook_file), "origin", "https://github.com/example/repo.git"],
+            input=feature_input,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(proc_allow_feature.returncode, 0)
+
+        # 3. Simulate pushing trunk to a personal fork remote (e.g. 'myfork') -> must succeed (exit 0)
+        proc_allow_remote = subprocess.run(
+            [str(hook_file), "myfork", "https://github.com/user/fork.git"],
+            input=push_input,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(proc_allow_remote.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
