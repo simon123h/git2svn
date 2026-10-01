@@ -17,7 +17,7 @@ from .state import (
     load_replay_state,
     save_replay_state,
 )
-from .svn import SvnWorkspace
+from .svn import SvnError, SvnWorkspace
 
 logger = logging.getLogger("git2svn")
 
@@ -327,6 +327,10 @@ class Synchronizer:
             try:
                 self._patch_and_stage_commit(commit_hash)
                 self.svn.commit(commit_msg)
+            except SvnError:
+                # SVN operational failure (e.g. working copy locked, out-of-date, collision)
+                # Re-raise directly to display actionable SVN resolution hints
+                raise
             except Exception:
                 remaining = commits[idx - start_index + 1 :]
                 state_data = {

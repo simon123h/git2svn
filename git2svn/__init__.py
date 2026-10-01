@@ -17,7 +17,7 @@ from .state import (
     load_replay_state,
     save_replay_state,
 )
-from .svn import SvnWorkspace
+from .svn import SvnError, SvnLockError, SvnOutOfDateError, SvnWorkspace
 
 try:
     from ._version import __version__
@@ -39,6 +39,9 @@ __all__ = [
     "Synchronizer",
     "GitRepo",
     "SvnWorkspace",
+    "SvnError",
+    "SvnLockError",
+    "SvnOutOfDateError",
     "Patcher",
     "FileChange",
     "parse_ref_arguments",

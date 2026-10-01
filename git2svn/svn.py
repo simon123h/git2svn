@@ -32,6 +32,72 @@ def find_svn_binary() -> str:
     return "svn"
 
 
+class SvnError(RuntimeError):
+    """Base exception for Subversion command failures."""
+
+    def __init__(self, message: str, stderr: str = "", returncode: int = 1):
+        super().__init__(message)
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+class SvnLockError(SvnError):
+    """Raised when the SVN working copy or a file is locked (e.g. E155004)."""
+
+    pass
+
+
+class SvnOutOfDateError(SvnError):
+    """Raised when an SVN commit or update fails due to out-of-date items or collision (e.g. E155015 / E160024)."""
+
+    pass
+
+
+def parse_svn_error(stderr: str, action_desc: str, svn_dir: Path) -> SvnError:
+    """Analyze Subversion stderr and construct actionable SvnError with cleanup hints."""
+    lower_err = stderr.lower()
+    clean_stderr = stderr.strip()
+
+    # 1. Working copy locked (E155004 / "is already locked" / "run 'svn cleanup'")
+    if (
+        "e155004" in lower_err
+        or "working copy locked" in lower_err
+        or "already locked" in lower_err
+        or "run 'svn cleanup'" in lower_err
+    ):
+        hint = (
+            f"Subversion working copy at '{svn_dir}' is locked.\n"
+            f"Details from SVN:\n  {clean_stderr}\n\n"
+            f"To resolve:\n"
+            f'  1. Run: svn cleanup "{svn_dir}"\n'
+            f"  2. If a background process (IDE, mirror sync, indexing) is running, wait for it to finish.\n"
+            f"  3. Retry your git2svn command."
+        )
+        return SvnLockError(hint, stderr=clean_stderr)
+
+    # 2. Out of date / collision (E155015 / E160024 / E155011 / "out of date" / "item is out of date")
+    if (
+        "e155015" in lower_err
+        or "e160024" in lower_err
+        or "e155011" in lower_err
+        or "out of date" in lower_err
+        or "conflict" in lower_err
+    ):
+        hint = (
+            f"Subversion working copy at '{svn_dir}' is out of date or conflicted.\n"
+            f"Details from SVN:\n  {clean_stderr}\n\n"
+            f"To resolve:\n"
+            f'  1. Run: svn update "{svn_dir}"\n'
+            f"  2. Resolve any SVN conflicts if present ('svn status').\n"
+            f"  3. Retry your git2svn command (e.g. 'git2svn replay --continue' or retry replay)."
+        )
+        return SvnOutOfDateError(hint, stderr=clean_stderr)
+
+    # Generic SVN error with context
+    msg = f"Failed to {action_desc} in '{svn_dir}':\n  {clean_stderr}"
+    return SvnError(msg, stderr=clean_stderr)
+
+
 class SvnWorkspace:
     """Wrapper around SVN commands and filesystem staging operations."""
 
@@ -83,6 +149,8 @@ class SvnWorkspace:
     def is_clean(self) -> bool:
         """Check if SVN workspace has no uncommitted changes."""
         res = self.run_cmd(["status", "-q"], check=False)
+        if res.returncode != 0:
+            raise parse_svn_error(res.stderr, "check status", self.workspace_dir)
         return not bool(res.stdout.strip())
 
     def get_versioned_files(self) -> List[Path]:
@@ -143,9 +211,7 @@ class SvnWorkspace:
         if res.returncode != 0:
             if "is already under version control" not in res.stderr and "already exists" not in res.stderr:
                 logger.error("Failed to 'svn add %s': %s", posix_path, res.stderr.strip())
-                raise subprocess.CalledProcessError(
-                    res.returncode, [self.svn_bin, "add", posix_path], res.stdout, res.stderr
-                )
+                raise parse_svn_error(res.stderr, f"add '{posix_path}'", self.workspace_dir)
 
     def stage_rm(self, rel_path: Path) -> None:
         """Run svn rm <filepath>."""
@@ -156,9 +222,7 @@ class SvnWorkspace:
                 logger.warning("File %s not under SVN control to remove.", posix_path)
             else:
                 logger.error("Failed to 'svn rm %s': %s", posix_path, res.stderr.strip())
-                raise subprocess.CalledProcessError(
-                    res.returncode, [self.svn_bin, "rm", posix_path], res.stdout, res.stderr
-                )
+                raise parse_svn_error(res.stderr, f"remove '{posix_path}'", self.workspace_dir)
 
     def commit(self, message: str) -> None:
         """Run svn commit using a temporary file with -F to support arbitrary message lengths and encodings."""
@@ -175,9 +239,7 @@ class SvnWorkspace:
             res = self.run_cmd(["commit", "-F", str(tf_path)], check=False)
             if res.returncode != 0:
                 logger.error("Failed to 'svn commit': %s", res.stderr.strip())
-                raise subprocess.CalledProcessError(
-                    res.returncode, [self.svn_bin, "commit", "-F", str(tf_path)], res.stdout, res.stderr
-                )
+                raise parse_svn_error(res.stderr, "commit", self.workspace_dir)
             if res.stdout:
                 logger.info("SVN commit output:\n%s", res.stdout.strip())
         finally:
@@ -220,6 +282,6 @@ class SvnWorkspace:
         res = self.run_cmd(["update"], check=False)
         if res.returncode != 0:
             logger.error("Failed to 'svn update': %s", res.stderr.strip())
-            raise subprocess.CalledProcessError(res.returncode, [self.svn_bin, "update"], res.stdout, res.stderr)
+            raise parse_svn_error(res.stderr, "update", self.workspace_dir)
         if res.stdout:
             logger.info("SVN update output:\n%s", res.stdout.strip())

@@ -1040,5 +1040,69 @@ class TestEolUtilities(unittest.TestCase):
             self.assertEqual(git2svn.svn.find_svn_binary(), "svn")
 
 
+class TestSvnLockAndCollisionHandling(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp_dir.name).resolve()
+        self.workspace = git2svn.SvnWorkspace(self.path)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_parse_svn_error_lock(self):
+        stderr = "svn: E155004: Working copy '/tmp/svn_wc' locked.\nsvn: run 'svn cleanup' to remove locks"
+        err = git2svn.svn.parse_svn_error(stderr, "commit", self.path)
+        self.assertIsInstance(err, git2svn.SvnLockError)
+        self.assertIn("is locked", str(err))
+        self.assertIn("svn cleanup", str(err))
+
+    def test_parse_svn_error_out_of_date(self):
+        stderr = "svn: E155015: Aborting commit: 'file.txt' remains in conflict / item is out of date"
+        err = git2svn.svn.parse_svn_error(stderr, "commit", self.path)
+        self.assertIsInstance(err, git2svn.SvnOutOfDateError)
+        self.assertIn("out of date", str(err))
+        self.assertIn("svn update", str(err))
+
+    def test_parse_svn_error_e160024_conflict(self):
+        stderr = "svn: E160024: resource out of date; try updating"
+        err = git2svn.svn.parse_svn_error(stderr, "commit", self.path)
+        self.assertIsInstance(err, git2svn.SvnOutOfDateError)
+        self.assertIn("svn update", str(err))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_commit_raises_lock_error_with_hints(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="svn: E155004: Working copy locked; please run 'svn cleanup'"
+        )
+        with self.assertRaises(git2svn.SvnLockError) as cm:
+            self.workspace.commit("test msg")
+        self.assertIn("svn cleanup", str(cm.exception))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_commit_raises_out_of_date_error_with_hints(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="svn: E155015: Commit failed because item is out of date"
+        )
+        with self.assertRaises(git2svn.SvnOutOfDateError) as cm:
+            self.workspace.commit("test msg")
+        self.assertIn("svn update", str(cm.exception))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_update_raises_lock_error(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="svn: E155004: Working copy locked."
+        )
+        with self.assertRaises(git2svn.SvnLockError):
+            self.workspace.update()
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_is_clean_raises_on_lock(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="svn: E155004: Working copy locked."
+        )
+        with self.assertRaises(git2svn.SvnLockError):
+            self.workspace.is_clean()
+
+
 if __name__ == "__main__":
     unittest.main()

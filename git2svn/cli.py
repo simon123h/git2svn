@@ -12,7 +12,7 @@ from .core import Synchronizer
 from .git import GitRepo
 from .patcher import Patcher
 from .state import load_replay_state
-from .svn import SvnWorkspace
+from .svn import SvnError, SvnLockError, SvnOutOfDateError, SvnWorkspace
 
 logger = logging.getLogger("git2svn")
 
@@ -472,6 +472,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 sync_mgr.replay(ref1, ref2)
         else:
             return 1
+    except (SvnLockError, SvnOutOfDateError) as e:
+        print(f"\n[SVN Error] {e}", file=sys.stderr)
+        return e.returncode
+    except SvnError as e:
+        print(f"\n[SVN Error] {e}", file=sys.stderr)
+        return e.returncode
     except subprocess.CalledProcessError as e:
         logger.error("Process failed with returncode %s", e.returncode)
         return e.returncode

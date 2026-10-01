@@ -53,3 +53,33 @@ git2svn replay -u <range>
 # Or configure globally:
 git config git2svn.autoUpdate true
 ```
+
+---
+
+### Q: Why does `git2svn` fail with "Subversion working copy is locked" (`E155004`)?
+If Subversion was interrupted mid-operation (e.g. an aborted command, an IDE indexing run, or a background mirror sync), Subversion places lock files in `.svn` to prevent database corruption.
+
+To resolve:
+1. Run:
+   ```bash
+   svn cleanup /path/to/svn
+   ```
+2. If background sync scripts or IDE indexing processes are actively touching the directory, wait for them to finish.
+3. Re-run your `git2svn` command.
+
+---
+
+### Q: Why does `git2svn` fail with "Item is out of date" or collision (`E155015` / `E160024`)?
+This happens when another developer or automated process committed new revisions to Subversion upstream while your local working copy was still at an older revision. Subversion rejects committing against stale base revisions.
+
+To resolve:
+1. Update your SVN working copy to bring it up to HEAD:
+   ```bash
+   svn update /path/to/svn
+   ```
+2. Check `svn status` to verify there are no tree or content conflicts.
+3. If an in-progress replay was paused, continue it with:
+   ```bash
+   git2svn replay --continue
+   ```
+
