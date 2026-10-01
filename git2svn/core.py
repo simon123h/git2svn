@@ -219,6 +219,56 @@ class Synchronizer:
         """
         return self.svn.diff(stat=stat)
 
+    def clean(self) -> None:
+        """
+        Revert all uncommitted changes, remove untracked conflict files (.rej/.orig),
+        remove unversioned files/dirs, and clear SVN locks via svn cleanup.
+        """
+        logger.info("Cleaning SVN workspace at %s...", self.svn.workspace_dir)
+        if self.dry_run:
+            print(
+                f"[DRY-RUN] Revert uncommitted changes, cleanup locks, and remove conflict artifacts in {self.svn.workspace_dir}"
+            )
+            return
+
+        # 1. Clear locks
+        try:
+            self.svn.cleanup()
+        except Exception as e:
+            logger.warning("svn cleanup reported: %s", e)
+
+        # 2. Revert versioned changes
+        self.svn.revert_all()
+
+        # 3. Clean untracked conflict artifacts (.rej / .orig)
+        clean_conflict_artifacts(self.svn.workspace_dir)
+
+        # 4. Remove leftover unversioned files/dirs
+        unversioned = self.svn.get_unversioned_items()
+        for item in unversioned:
+            full_p = self.svn.workspace_dir / item
+            if full_p.is_dir() and not full_p.is_symlink():
+                shutil.rmtree(full_p, ignore_errors=True)
+            elif full_p.exists() or full_p.is_symlink():
+                full_p.unlink(missing_ok=True)
+
+        # 5. Clear any interrupted replay state file
+        clear_replay_state(self.svn.workspace_dir)
+        logger.info("SVN workspace cleaned successfully.")
+
+    def purge_workspace(self) -> None:
+        """
+        Completely delete the local managed SVN working copy directory so it can be re-cloned cleanly.
+        """
+        logger.info("Purging SVN workspace directory at %s...", self.svn.workspace_dir)
+        if self.dry_run:
+            print(f"[DRY-RUN] Delete directory {self.svn.workspace_dir}")
+            return
+
+        if self.svn.workspace_dir.exists():
+            shutil.rmtree(self.svn.workspace_dir, ignore_errors=True)
+            logger.info("SVN workspace purged.")
+
     def replay(self, ref1: str, ref2: Optional[str] = None) -> None:
         """
         Replay a single commit or range of commits onto SVN, committing each with its Git message.

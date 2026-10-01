@@ -241,6 +241,26 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
             mock_print.assert_called_once()
             self.assertIn("[DRY-RUN]", mock_print.call_args[0][0])
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_cleanup_success_and_failure(self, mock_cmd):
+        """Verify SvnWorkspace.cleanup runs svn cleanup and raises on failure."""
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        self.workspace.cleanup()
+        mock_cmd.assert_called_with(["cleanup"], check=False)
+
+        mock_cmd.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="svn: E155004: cleanup error")
+        with self.assertRaises(git2svn.SvnError):
+            self.workspace.cleanup()
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_get_unversioned_items(self, mock_cmd):
+        """Verify get_unversioned_items parses unversioned lines from svn status."""
+        mock_cmd.return_value = subprocess.CompletedProcess(
+            [], 0, stdout="?      unversioned.txt\nM      modified.txt\n?      dir/nested.txt\n", stderr=""
+        )
+        items = self.workspace.get_unversioned_items()
+        self.assertEqual(items, [Path("unversioned.txt"), Path("dir/nested.txt")])
+
 
 if __name__ == "__main__":
     unittest.main()

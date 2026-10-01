@@ -717,6 +717,49 @@ class TestSynchronizer(unittest.TestCase):
         self.assertTrue(svn_link.is_symlink())
         self.assertEqual(os.readlink(svn_link), "target.txt")
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_clean_workspace(self, mock_svn_cmd):
+        """Verify synchronizer.clean cleans locks, reverts changes, removes untracked and conflict files."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Create conflict artifacts
+        rej_file = self.svn_path / "file.txt.rej"
+        rej_file.write_text("conflict rej\n")
+        orig_file = self.svn_path / "file.txt.orig"
+        orig_file.write_text("conflict orig\n")
+
+        # Create replay state
+        git2svn.save_replay_state(self.svn_path, {"state": "CONFLICT_PAUSED"})
+
+        # Setup mock for get_unversioned_items
+        unversioned_file = self.svn_path / "untracked.txt"
+        unversioned_file.write_text("untracked\n")
+        unversioned_dir = self.svn_path / "untracked_dir"
+        unversioned_dir.mkdir()
+        (unversioned_dir / "nested.txt").write_text("nested\n")
+
+        with patch.object(
+            self.svn_ws, "get_unversioned_items", return_value=[Path("untracked.txt"), Path("untracked_dir")]
+        ):
+            self.sync_mgr.clean()
+
+        self.assertFalse(rej_file.exists())
+        self.assertFalse(orig_file.exists())
+        self.assertFalse(unversioned_file.exists())
+        self.assertFalse(unversioned_dir.exists())
+        self.assertIsNone(git2svn.load_replay_state(self.svn_path))
+
+    def test_purge_workspace(self):
+        """Verify purge_workspace completely deletes the workspace directory."""
+        temp_dir = self.path if hasattr(self, "path") else self.svn_path.parent / "to_purge"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        (temp_dir / "data.txt").write_text("some data")
+        ws = git2svn.SvnWorkspace(temp_dir)
+        mgr = git2svn.Synchronizer(self.git_repo, ws, self.patcher)
+
+        mgr.purge_workspace()
+        self.assertFalse(temp_dir.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

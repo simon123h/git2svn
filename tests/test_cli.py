@@ -441,6 +441,38 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_sync.stage.assert_called_once_with("HEAD", None, use_copy=False, snapshot=True)
 
+    def test_cli_clean_execution(self):
+        """Verify git2svn clean invokes synchronizer.clean and exits with code 0."""
+        git_dir = self.path / "clean_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "clean_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.cli.Synchronizer") as mock_sync_cls:
+            mock_sync = mock_sync_cls.return_value
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "clean"])
+            self.assertEqual(code, 0)
+            mock_sync.clean.assert_called_once()
+
+    def test_cli_clean_purge_execution(self):
+        """Verify git2svn clean --purge invokes synchronizer.purge_workspace and exits with code 0."""
+        git_dir = self.path / "purge_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "purge_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.cli.Synchronizer") as mock_sync_cls:
+            mock_sync = mock_sync_cls.return_value
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "clean", "--purge"])
+            self.assertEqual(code, 0)
+            mock_sync.purge_workspace.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

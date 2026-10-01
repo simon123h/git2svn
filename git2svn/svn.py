@@ -277,6 +277,26 @@ class SvnWorkspace:
         logger.info("Reverting SVN workspace changes...")
         self.run_cmd(["revert", "-R", "."], check=False)
 
+    def cleanup(self) -> None:
+        """Run svn cleanup to release locks and fix interrupted operations."""
+        logger.info("Running svn cleanup in %s...", self.workspace_dir)
+        res = self.run_cmd(["cleanup"], check=False)
+        if res.returncode != 0:
+            logger.error("Failed to run 'svn cleanup': %s", res.stderr.strip())
+            raise parse_svn_error(res.stderr, "cleanup", self.workspace_dir)
+
+    def get_unversioned_items(self) -> List[Path]:
+        """Return list of unversioned files and directories ('?' status in svn status)."""
+        res = self.run_cmd(["status"], check=False)
+        items: List[Path] = []
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if line.startswith("?"):
+                    parts = line.split(maxsplit=1)
+                    if len(parts) >= 2:
+                        items.append(Path(parts[1].strip()))
+        return items
+
     def stage_add(self, rel_path: Path) -> None:
         """Run svn add <filepath> --parents. Creates parent directories if needed."""
         target_path = self.workspace_dir / rel_path

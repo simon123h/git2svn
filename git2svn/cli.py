@@ -250,6 +250,24 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # clean
+    parser_clean = subparsers.add_parser(
+        "clean",
+        parents=[common_parser],
+        help="Revert uncommitted changes, clear SVN locks, and remove conflict artifacts",
+        description=(
+            "Clean the SVN workspace by running 'svn revert -R', 'svn cleanup', deleting untracked\n"
+            "conflict artifacts (.rej / .orig), and removing unversioned files/directories.\n"
+            "Optionally pass --purge to completely delete and re-initialize the managed working copy."
+        ),
+    )
+    parser_clean.add_argument(
+        "--purge",
+        action="store_true",
+        default=False,
+        help="Completely delete the local managed SVN working copy directory (fresh re-checkout)",
+    )
+
     return parser
 
 
@@ -277,6 +295,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         snapshot=False,
         diff=False,
         stat=False,
+        purge=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -446,6 +465,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 sync_mgr.replay(ref1, ref2)
         elif args.command == "status":
             return sync_mgr.status()
+        elif args.command == "clean":
+            if getattr(args, "purge", False):
+                sync_mgr.purge_workspace()
+            else:
+                sync_mgr.clean()
+            return 0
         else:
             return 1
     except (SvnLockError, SvnOutOfDateError) as e:
