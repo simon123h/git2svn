@@ -85,3 +85,18 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - Avoids temporal inconsistencies in SVN repositories where revisions must strictly increase in time.
   - Keeps the codebase lightweight and free of brittle revision-property manipulation logic.
 
+---
+
+### ADR-12: Scope Boundary: Adapter Bridge vs. Autonomous Master-Slave Exporter
+* **Context:** In scenarios where Git is the sole upstream source of truth without an automated reverse `svn2git` mirror creating tracking branches (e.g. `origin/svn-mirror/trunk`), `git2svn` has no external reference point to determine which Git commit corresponds to the current state of the SVN working copy. To operate autonomously without an explicit Git range or external mirror, `git2svn` would need to record and track synchronization state across boundaries (e.g. via SVN commit trailers, custom root revision properties, or local/remote sync tags), implement out-of-band conflict reconciliation logic, and handle multi-branch topology mapping.
+* **Decision:** Explicitly maintain `git2svn`'s scope as a lightweight, stateless **adapter bridge** rather than an autonomous master-slave repository replication system:
+  1. `git2svn` will not take on the responsibility of an internal state machine or persistent cross-VCS metadata synchronization engine.
+  2. In the standard workflow, state and collision detection remain externalized in Git (via mirror tracking branches) and SVN working copy revisions.
+  3. When operating without an SVN-to-Git mirror, `git2svn` continues to function reliably as an explicit delivery tool via user-directed arguments:
+     - `git2svn replay <base-commit>..<target-commit>` (explicitly providing the base commit where SVN last left off).
+     - `git2svn stage --snapshot <target-ref>` (statelessly projecting the desired Git tree onto the SVN workspace without requiring historical ancestry).
+* **Consequences:**
+  - Preserves Unix philosophy: `git2svn` focuses solely on reliably applying Git diffs and tree states to an SVN working copy.
+  - Keeps the codebase lean, robust, and free of fragile metadata synchronization or repository reconciliation logic.
+  - Avoids architectural divergence and false promises regarding bidirectional synchronization or unmanaged out-of-band SVN mutations.
+
