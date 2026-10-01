@@ -481,7 +481,7 @@ class TestSynchronizer(unittest.TestCase):
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             self.sync_mgr.replay(base_hash, feat_hash)
             output = mock_stdout.getvalue()
-            self.assertIn(f"[1/1] Applying {feat_hash[:8]}: feat: progress indicator... OK", output)
+            self.assertIn(f"[1/1] Applying {feat_hash[:8]}: feat: progress indicator... OK (", output)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_stage_with_git_config_default_range(self, mock_svn_cmd):

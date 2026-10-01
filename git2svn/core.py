@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -336,6 +337,7 @@ class Synchronizer:
 
     def _execute_replay_queue(self, commits: List[str], total_commits: int, start_index: int) -> None:
         """Execute a list of commits sequentially, catching conflicts and persisting state."""
+        queue_start = time.perf_counter()
         pad_width = len(str(total_commits))
         for idx, commit_hash in enumerate(commits, start=start_index):
             commit_msg = self.git.get_commit_message(commit_hash)
@@ -351,19 +353,23 @@ class Synchronizer:
                 sys.stdout.write(f"{progress_prefix}... ")
                 sys.stdout.flush()
 
+            commit_start = time.perf_counter()
             try:
                 self._patch_and_stage_commit(commit_hash)
                 self.svn.commit(commit_msg)
-                sys.stdout.write("OK\n")
+                elapsed = time.perf_counter() - commit_start
+                sys.stdout.write(f"OK ({elapsed:.2f}s)\n")
                 sys.stdout.flush()
             except SvnError:
-                sys.stdout.write("FAILED (SVN error)\n")
+                elapsed = time.perf_counter() - commit_start
+                sys.stdout.write(f"FAILED (SVN error, {elapsed:.2f}s)\n")
                 sys.stdout.flush()
                 # SVN operational failure (e.g. working copy locked, out-of-date, collision)
                 # Re-raise directly to display actionable SVN resolution hints
                 raise
             except Exception:
-                sys.stdout.write("CONFLICT\n")
+                elapsed = time.perf_counter() - commit_start
+                sys.stdout.write(f"CONFLICT ({elapsed:.2f}s)\n")
                 sys.stdout.flush()
                 remaining = commits[idx - start_index + 1 :]
                 state_data = {
@@ -398,7 +404,12 @@ class Synchronizer:
                 )
                 raise
         clear_replay_state(self.svn.workspace_dir)
-        logger.info("Replay completed successfully! All %d commits applied.", total_commits)
+        total_elapsed = time.perf_counter() - queue_start
+        logger.info(
+            "Replay completed successfully! All %d commits applied in %.2fs.",
+            total_commits,
+            total_elapsed,
+        )
         if self.auto_update:
             self.svn.update()
 
