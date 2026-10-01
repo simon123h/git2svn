@@ -1,5 +1,7 @@
 import io
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -548,10 +550,17 @@ class TestCli(unittest.TestCase):
         hook_file = git_dir / ".git" / "hooks" / "pre-push"
         self.assertTrue(hook_file.is_file())
 
+        # Determine shell runner (on Windows, POSIX shell scripts cannot be spawned directly without sh/bash)
+        sh_bin = shutil.which("sh") or shutil.which("bash")
+        if sys.platform.startswith("win") and not sh_bin:
+            self.skipTest("No sh or bash found on Windows to execute pre-push hook directly")
+
+        base_cmd = [sh_bin, str(hook_file)] if sh_bin else [str(hook_file)]
+
         # 1. Simulate pushing trunk to origin -> must exit 1 and output error
         push_input = "refs/heads/trunk aaaa refs/heads/trunk bbbb\n"
         proc_block = subprocess.run(
-            [str(hook_file), "origin", "https://github.com/example/repo.git"],
+            [*base_cmd, "origin", "https://github.com/example/repo.git"],
             input=push_input,
             text=True,
             capture_output=True,
@@ -563,7 +572,7 @@ class TestCli(unittest.TestCase):
         # 2. Simulate pushing a feature branch to origin -> must succeed (exit 0)
         feature_input = "refs/heads/feature/login aaaa refs/heads/feature/login bbbb\n"
         proc_allow_feature = subprocess.run(
-            [str(hook_file), "origin", "https://github.com/example/repo.git"],
+            [*base_cmd, "origin", "https://github.com/example/repo.git"],
             input=feature_input,
             text=True,
             capture_output=True,
@@ -572,7 +581,7 @@ class TestCli(unittest.TestCase):
 
         # 3. Simulate pushing trunk to a personal fork remote (e.g. 'myfork') -> must succeed (exit 0)
         proc_allow_remote = subprocess.run(
-            [str(hook_file), "myfork", "https://github.com/user/fork.git"],
+            [*base_cmd, "myfork", "https://github.com/user/fork.git"],
             input=push_input,
             text=True,
             capture_output=True,
