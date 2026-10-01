@@ -135,6 +135,94 @@ class TestStatus(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_status.assert_called_once()
 
+    def test_status_missing_start_ref(self):
+        """Status warns when start_ref of range does not exist in Git."""
+        self.git_repo.set_config("git2svn.defaultRange", "nonexistent_branch..main")
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch("sys.stdout") as mock_stdout,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            self.assertTrue(any("nonexistent_branch" in str(c) for c in mock_stdout.mock_calls))
+
+    def test_status_missing_end_ref(self):
+        """Status warns when end_ref of range does not exist in Git."""
+        f = self.git_path / "base.txt"
+        f.write_text("base\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+        head = self.git_repo.get_head_commit()
+
+        self.git_repo.set_config("git2svn.defaultRange", f"{head}..nonexistent_end")
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch("sys.stdout"),
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+
+    def test_status_more_than_ten_commits(self):
+        """Status truncates list and prints '... and X more' when > 10 commits are pending."""
+        f = self.git_path / "file.txt"
+        f.write_text("base\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+        base = self.git_repo.get_head_commit()
+
+        for i in range(12):
+            f.write_text(f"commit {i}\n")
+            subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+            subprocess.run(["git", "commit", "-m", f"commit {i}"], cwd=self.git_path, check=True)
+        head = self.git_repo.get_head_commit()
+
+        self.git_repo.set_config("git2svn.defaultRange", f"{base}..{head}")
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("and 2 more" in line for line in printed_lines))
+
+    def test_status_dirty_svn_workspace_with_summary(self):
+        """Status displays dirty status and listed uncommitted files."""
+        f = self.git_path / "init.txt"
+        f.write_text("hello\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.git_path, check=True)
+
+        uncommitted_files = [f"M file_{i}.txt" for i in range(7)]
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=False),
+            patch.object(self.svn_workspace, "get_status_summary", return_value=uncommitted_files),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Dirty (7 uncommitted changes)" in line for line in printed_lines))
+            self.assertTrue(any("and 2 more" in line for line in printed_lines))
+
+    def test_status_svn_error_handling(self):
+        """Status handles SvnError when checking svn status."""
+        with (
+            patch.object(
+                self.svn_workspace, "is_clean", side_effect=git2svn.SvnError("Working copy locked", returncode=1)
+            ),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 1)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Error: Working copy locked" in line for line in printed_lines))
+
 
 if __name__ == "__main__":
     unittest.main()

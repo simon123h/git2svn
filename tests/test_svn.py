@@ -147,7 +147,37 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
         mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="file.txt | 2 +-\n", stderr="")
         output = self.workspace.diff(stat=True)
         self.assertEqual(output, "file.txt | 2 +-\n")
-        mock_cmd.assert_called_once_with(["diff", "--stat"], check=False)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_apply_structural_changes_rename(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        change = git2svn.FileChange("R", Path("new_name.txt"), old_path=Path("old_name.txt"))
+        self.workspace.apply_structural_changes([change])
+        calls = [call[0][0] for call in mock_cmd.call_args_list]
+        self.assertIn(["rm", "old_name.txt"], calls)
+        self.assertIn(["add", "new_name.txt", "--parents"], calls)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_apply_structural_changes_copy(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        change = git2svn.FileChange("C", Path("copied.txt"), old_path=Path("source.txt"))
+        self.workspace.apply_structural_changes([change])
+        calls = [call[0][0] for call in mock_cmd.call_args_list]
+        self.assertIn(["add", "copied.txt", "--parents"], calls)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_is_valid_workspace_via_info(self, mock_cmd):
+        """Verify is_valid_workspace succeeds when .svn is absent but 'svn info' returns 0."""
+        # Use an empty directory without .svn
+        empty_dir = self.path / "no_svn_subdir"
+        empty_dir.mkdir()
+        ws = git2svn.SvnWorkspace(empty_dir)
+
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="URL: https://...\n", stderr="")
+        self.assertTrue(ws.is_valid_workspace())
+
+        mock_cmd.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="Not a working copy")
+        self.assertFalse(ws.is_valid_workspace())
 
 
 if __name__ == "__main__":

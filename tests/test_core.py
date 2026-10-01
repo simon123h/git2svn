@@ -691,6 +691,33 @@ class TestSynchronizer(unittest.TestCase):
                 self.sync_mgr.replay("HEAD")
             self.assertIn("SVN workspace has uncommitted changes", str(cm.exception))
 
+    def test_snapshot_symlink(self):
+        """Verify stage --snapshot handles symlinks (mode 120000)."""
+        import os
+
+        # Git tree with target file and a symlink pointing to it
+        target = self.git_path / "target.txt"
+        target.write_text("target file content\n")
+        link = self.git_path / "link.txt"
+        try:
+            os.symlink("target.txt", link)
+        except OSError:
+            self.skipTest("Symlinks not supported on this platform/privilege level")
+
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "add symlink"], cwd=self.git_path, check=True)
+        target_ref = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with patch.object(self.svn_ws, "run_cmd") as mock_svn_cmd:
+            mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            self.sync_mgr.stage(target_ref, snapshot=True)
+
+        svn_link = self.svn_path / "link.txt"
+        self.assertTrue(svn_link.is_symlink())
+        self.assertEqual(os.readlink(svn_link), "target.txt")
+
 
 if __name__ == "__main__":
     unittest.main()

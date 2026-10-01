@@ -226,6 +226,113 @@ class TestCli(unittest.TestCase):
             mock_sync.diff.assert_called_once_with(stat=False)
             self.assertIn("=== diff content ===", fake_out.getvalue())
 
+    def test_diff_stat_execution(self):
+        """Verify git2svn diff --stat passes stat=True."""
+        git_dir = self.path / "stat_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "stat_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.cli.Synchronizer") as mock_sync_cls, patch("sys.stdout", new=io.StringIO()) as fake_out:
+            mock_sync = mock_sync_cls.return_value
+            mock_sync.diff.return_value = "file.txt | 2 +-\n"
+
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "diff", "--stat"])
+            self.assertEqual(code, 0)
+            mock_sync.diff.assert_called_once_with(stat=True)
+            self.assertIn("file.txt | 2 +-", fake_out.getvalue())
+
+    def test_stage_with_diff_flag_prints_preview(self):
+        """Verify git2svn stage -p / --diff invokes diff and prints preview output."""
+        git_dir = self.path / "stage_diff_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "stage_diff_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.cli.Synchronizer") as mock_sync_cls, patch("sys.stdout", new=io.StringIO()) as fake_out:
+            mock_sync = mock_sync_cls.return_value
+            mock_sync.diff.return_value = "Index: staged.txt\n"
+
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage", "HEAD", "--diff"])
+            self.assertEqual(code, 0)
+            mock_sync.stage.assert_called_once()
+            mock_sync.diff.assert_called_once_with()
+            self.assertIn("Index: staged.txt", fake_out.getvalue())
+
+    def test_stage_missing_ref_error(self):
+        """Verify error when stage is invoked without ref or configured defaultRange."""
+        git_dir = self.path / "no_ref_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "no_ref_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("sys.stderr"):
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage"])
+            self.assertEqual(code, 1)
+
+    def test_replay_missing_ref_error(self):
+        """Verify error when replay is invoked without ref or configured defaultRange."""
+        git_dir = self.path / "no_ref_replay_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "no_ref_replay_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("sys.stderr"):
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "replay"])
+            self.assertEqual(code, 1)
+
+    def test_cli_catches_svn_error(self):
+        """Verify CLI main cleanly formats and returns error code on SvnLockError and SvnError."""
+        git_dir = self.path / "svn_err_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "svn_err_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with (
+            patch("git2svn.cli.Synchronizer.stage", side_effect=git2svn.SvnLockError("Locked", returncode=2)),
+            patch("sys.stderr"),
+        ):
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage", "HEAD"])
+            self.assertEqual(code, 2)
+
+        with (
+            patch("git2svn.cli.Synchronizer.stage", side_effect=git2svn.SvnError("General SVN fail", returncode=3)),
+            patch("sys.stderr"),
+        ):
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage", "HEAD"])
+            self.assertEqual(code, 3)
+
+    def test_stage_snapshot_defaults_to_head(self):
+        """Verify stage --snapshot defaults ref1 to HEAD when omitted."""
+        git_dir = self.path / "snap_head_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "snap_head_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.cli.Synchronizer") as mock_sync_cls:
+            mock_sync = mock_sync_cls.return_value
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage", "--snapshot"])
+            self.assertEqual(code, 0)
+            mock_sync.stage.assert_called_once_with("HEAD", None, use_copy=False, snapshot=True)
+
 
 if __name__ == "__main__":
     unittest.main()
