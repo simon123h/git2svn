@@ -136,6 +136,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Mirror the exact tree of ref1 onto SVN without knowing base ref (adds new, removes missing, updates modified)",
     )
+    parser_stage.add_argument(
+        "--diff",
+        "-p",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Immediately show 'svn diff' preview of staged changes after staging",
+    )
 
     # replay
     parser_replay = subparsers.add_parser(
@@ -214,6 +221,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to SVN working copy (optional if already configured or set via --svn-dir)",
     )
 
+    # diff
+    parser_diff = subparsers.add_parser(
+        "diff",
+        parents=[common_parser],
+        help="Inspect uncommitted changes in the SVN workspace (preview after staging)",
+        description="Run svn diff on the SVN workspace to inspect uncommitted changes staged by git2svn.",
+    )
+    parser_diff.add_argument(
+        "--stat",
+        action="store_true",
+        default=False,
+        help="Display a diffstat summary of changed files instead of the full patch",
+    )
+
     # status
     subparsers.add_parser(
         "status",
@@ -249,6 +270,8 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         verbose=False,
         copy=False,
         snapshot=False,
+        diff=False,
+        stat=False,
         replay_action=None,
         update=None,
     )
@@ -380,6 +403,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                 use_copy=use_copy,
                 snapshot=is_snapshot,
             )
+            if getattr(args, "diff", False):
+                diff_output = sync_mgr.diff()
+                if diff_output.strip():
+                    print(diff_output, end="")
+        elif args.command == "diff":
+            show_stat = getattr(args, "stat", False)
+            diff_output = sync_mgr.diff(stat=show_stat)
+            if diff_output.strip():
+                print(diff_output, end="")
         elif args.command == "replay":
             action = getattr(args, "replay_action", None)
             if action == "continue":

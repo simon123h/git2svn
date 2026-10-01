@@ -153,6 +153,21 @@ class SvnWorkspace:
             raise parse_svn_error(res.stderr, "check status", self.workspace_dir)
         return not bool(res.stdout.strip())
 
+    def diff(self, target: Optional[str] = None, stat: bool = False) -> str:
+        """
+        Run 'svn diff' on the workspace or a specific target.
+        If stat is True, runs 'svn diff --stat' (summarized file changes).
+        """
+        args = ["diff"]
+        if stat:
+            args.append("--stat")
+        if target:
+            args.append(target)
+        res = self.run_cmd(args, check=False)
+        if res.returncode != 0:
+            raise parse_svn_error(res.stderr, "diff", self.workspace_dir)
+        return res.stdout
+
     def get_status_summary(self) -> List[str]:
         """Return lines of uncommitted changes from 'svn status -q'."""
         res = self.run_cmd(["status", "-q"], check=False)

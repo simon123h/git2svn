@@ -193,6 +193,39 @@ class TestCli(unittest.TestCase):
             mock_is_file.return_value = False
             self.assertEqual(git2svn.svn.find_svn_binary(), "svn")
 
+    def test_diff_subcommand_args(self):
+        """Verify diff subcommand argument parsing."""
+        args = git2svn.parse_cli_args(["diff", "-s", "/path/to/svn"])
+        self.assertEqual(args.command, "diff")
+        self.assertFalse(args.stat)
+
+        args_stat = git2svn.parse_cli_args(["diff", "--stat", "-s", "/path/to/svn"])
+        self.assertEqual(args_stat.command, "diff")
+        self.assertTrue(args_stat.stat)
+
+        args_stage_diff = git2svn.parse_cli_args(["stage", "HEAD", "-p", "-s", "/path/to/svn"])
+        self.assertEqual(args_stage_diff.command, "stage")
+        self.assertTrue(args_stage_diff.diff)
+
+    def test_diff_command_execution(self):
+        """Verify git2svn diff invokes synchronizer.diff and prints output."""
+        git_dir = self.path / "diff_git"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        svn_dir = self.path / "diff_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.cli.Synchronizer") as mock_sync_cls, patch("sys.stdout", new=io.StringIO()) as fake_out:
+            mock_sync = mock_sync_cls.return_value
+            mock_sync.diff.return_value = "Index: file.txt\n=== diff content ===\n"
+
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "diff"])
+            self.assertEqual(code, 0)
+            mock_sync.diff.assert_called_once_with(stat=False)
+            self.assertIn("=== diff content ===", fake_out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

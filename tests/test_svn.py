@@ -135,6 +135,20 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
         with self.assertRaises(git2svn.SvnLockError):
             self.workspace.is_clean()
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_diff(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="Index: file.txt\n", stderr="")
+        output = self.workspace.diff()
+        self.assertEqual(output, "Index: file.txt\n")
+        mock_cmd.assert_called_once_with(["diff"], check=False)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_diff_stat(self, mock_cmd):
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="file.txt | 2 +-\n", stderr="")
+        output = self.workspace.diff(stat=True)
+        self.assertEqual(output, "file.txt | 2 +-\n")
+        mock_cmd.assert_called_once_with(["diff", "--stat"], check=False)
+
 
 if __name__ == "__main__":
     unittest.main()

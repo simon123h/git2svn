@@ -211,6 +211,13 @@ class Synchronizer:
             modified_count,
         )
 
+    def diff(self, stat: bool = False) -> str:
+        """
+        Inspect uncommitted changes in the SVN workspace using svn diff.
+        Returns the diff output text (or stat summary if stat=True).
+        """
+        return self.svn.diff(stat=stat)
+
     def replay(self, ref1: str, ref2: Optional[str] = None) -> None:
         """
         Replay a single commit or range of commits onto SVN, committing each with its Git message.
