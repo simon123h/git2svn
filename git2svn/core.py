@@ -71,7 +71,10 @@ class Synchronizer:
         If use_copy=True, brute-force copies files using Git object DB (bypassing patch).
         """
         if snapshot:
-            self.stage_snapshot(ref1)
+            # If a range was supplied (e.g. origin/main..main or ref1 and ref2), snapshot targets the end ref
+            is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
+            target_ref = end_ref if not is_single and end_ref else start_or_commit
+            self.stage_snapshot(target_ref)
             return
 
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)

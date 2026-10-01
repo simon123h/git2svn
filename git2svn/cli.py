@@ -473,6 +473,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         if args.command == "stage":
+            is_snapshot = getattr(args, "snapshot", False)
+            if not ref1 and is_snapshot:
+                ref1 = "HEAD"
+                logger.info("No ref specified for snapshot stage; defaulting to HEAD.")
+
             if not ref1:
                 print(
                     "Error: stage requires a commit or range (e.g. 'git2svn stage main..feature') "
@@ -484,7 +489,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ref1,
                 ref2,
                 use_copy=use_copy,
-                snapshot=getattr(args, "snapshot", False),
+                snapshot=is_snapshot,
             )
         elif args.command == "replay":
             action = getattr(args, "replay_action", None)
