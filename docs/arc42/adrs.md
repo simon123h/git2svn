@@ -117,18 +117,19 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
 
 ---
 
-### ADR-14: Pre-Push Mirror Protection Guard
-* **Context:** In standard Git-SVN workflows where Subversion is the authoritative source of truth and a tool like `svn2git` mirrors SVN commits to a Git remote tracking branch (e.g. `origin/trunk` or `svn-mirror/trunk`), developers can easily shoot themselves in the foot by accidentally running `git push` directly against the mirror remote. Pushing Git commits directly causes Git and SVN histories to diverge, breaking automated `svn2git` sync loops. Native solutions like setting `remote.<name>.pushurl = "no-push"` prevent all pushes unconditionally, which is problematic when the mirror is hosted on GitLab/GitHub and developers legitimately need to push feature branches for Pull/Merge Requests.
-* **Decision:** `git2svn setup` automatically installs a selective **pre-push hook guard** into `.git/hooks/pre-push`:
-  1. The hook parses the remote name and push refs passed via Git's stdin.
-  2. If the push targets the mirror remote and the protected trunk branch (`refs/heads/trunk`, `refs/heads/main`), the hook immediately aborts the push with exit code 1 and prints an actionable reminder to run `git svn-push` or `git2svn replay`.
-  3. Pushing feature branches to the remote (e.g. for PRs) or pushing to different remotes (personal forks) is permitted without restriction.
-  4. The hook installation is idempotent and preserves any existing user pre-push scripts by appending/updating a marked section block (`# --- START GIT2SVN PRE-PUSH GUARD ---`).
+### ADR-14: Pre-Push Mirror Remote Protection Guard
+* **Context:** In standard Git-SVN workflows where Subversion is the authoritative source of truth and a tool like `svn2git` mirrors SVN commits to a Git remote tracking branch (e.g. `origin` or `svn-mirror`), developers can easily shoot themselves in the foot by accidentally running `git push` directly against the mirror remote. Pushing Git commits directly to the mirror remote causes Git and SVN histories to diverge, breaking automated `svn2git` sync loops. Furthermore, mixing PR/collaboration feature branches on the mirror remote pollutes the SVN mirror namespace. Team collaboration and PRs should happen on a separate developer remote (e.g. personal fork or dedicated PR remote).
+* **Decision:** `git2svn setup` automatically installs a strict **pre-push hook guard** into `.git/hooks/pre-push` that blocks **all pushes** to the mirror remote:
+  1. The hook checks the target `REMOTE_NAME` passed via Git's positional arguments (`$1`).
+  2. If the push targets the configured mirror remote (`origin` or `svn-mirror`), the hook immediately aborts the push with exit code 1 regardless of target branch.
+  3. It prints clear, actionable guidance explaining that the mirror remote is read-only, changes to SVN must be published via `git2svn replay` (or `git svn-push`), and branch collaboration should be pushed to a separate developer remote.
+  4. Pushes to any other configured remote (e.g. `myfork`, `gitlab`, `pr-origin`) are permitted without restriction.
+  5. The hook installation is idempotent and preserves any existing user pre-push scripts by appending/updating a marked section block (`# --- START GIT2SVN PRE-PUSH GUARD ---`).
 * **Consequences:**
-  - Prevents the primary footgun of accidental direct pushes to the mirror branch.
-  - Retains full support for feature branch pushing and PR/MR workflows on GitHub/GitLab.
-  - Delivers clear, actionable developer guidance at the exact moment of error.
-  - Zero external dependencies: pure POSIX shell hook executed by Git itself.
+  - **Eliminates Accidental Mirror Pushes:** Completely prevents developers from pushing to the mirror remote, keeping it pristine for `svn2git` automation.
+  - **Clear Separation of Concerns:** Enforces clean separation between read-only SVN mirror remotes and human collaboration/PR remotes.
+  - **Robust and Simple:** Eliminates complex ref-parsing corner cases (tags, branch deletions, force-pushes); the entire remote is protected unconditionally.
+  - **Zero external dependencies:** Pure POSIX shell hook executed by Git itself.
 
 ---
 

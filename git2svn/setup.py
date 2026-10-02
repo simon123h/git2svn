@@ -170,8 +170,7 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     git_repo.set_config("alias.svn-pull", pull_script)
     git_repo.set_config("alias.svn-status", status_script)
 
-    # 6. Install pre-push hook to guard against accidental direct git push to mirror branch
-    hook_installed = install_pre_push_hook(git_repo, mirror_remote, trunk_name)
+    hook_installed = install_pre_push_hook(git_repo, mirror_remote)
 
     print("Successfully configured git2svn:")
     if configured_url:
@@ -186,7 +185,7 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     print(f"  alias.svn-pull      = {pull_script}")
     print(f"  alias.svn-status    = {status_script}")
     if hook_installed:
-        print(f"  pre-push hook       = installed (protects '{mirror_remote}/{trunk_name}' from direct push)")
+        print(f"  pre-push hook       = installed (protects mirror remote '{mirror_remote}' from direct push)")
 
     if not detected_mirror:
         print(
@@ -200,33 +199,30 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     return 0
 
 
-def install_pre_push_hook(git_repo: GitRepo, mirror_remote: str, trunk_branch: str) -> bool:
+def install_pre_push_hook(git_repo: GitRepo, mirror_remote: str) -> bool:
     """
     Install a pre-push hook into .git/hooks/pre-push that prevents accidental direct 'git push'
-    to the SVN mirror tracking branch (e.g. origin/trunk or svn-mirror/trunk), while allowing
-    pushes of other branches (e.g. feature branches or pull requests).
+    to the SVN mirror remote (e.g. origin or svn-mirror).
+    Pushes to other collaboration remotes (e.g. personal forks or GitHub/GitLab PR remotes) are permitted.
     """
     hooks_dir = git_repo.repo_dir / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     hook_file = hooks_dir / "pre-push"
 
     hook_block = f"""# --- START GIT2SVN PRE-PUSH GUARD ---
-# Block direct pushes to SVN mirror branch '{mirror_remote}/{trunk_branch}'
+# Block all direct pushes to SVN mirror remote '{mirror_remote}'
 REMOTE_NAME="$1"
 REMOTE_URL="$2"
 
 if [ "$REMOTE_NAME" = "{mirror_remote}" ]; then
-    while read -r local_ref local_sha remote_ref remote_sha; do
-        if [ "$remote_ref" = "refs/heads/{trunk_branch}" ]; then
-            echo "" >&2
-            echo "[git2svn pre-push guard] ERROR: Direct push to '{mirror_remote}/{trunk_branch}' is blocked!" >&2
-            echo "[git2svn pre-push guard] This branch is mirrored from SVN. Pushing directly causes svn2git to diverge." >&2
-            echo "[git2svn pre-push guard] To publish your changes to SVN, run:" >&2
-            echo "    git svn-push   (or: git2svn replay)" >&2
-            echo "" >&2
-            exit 1
-        fi
-    done
+    echo "" >&2
+    echo "[git2svn pre-push guard] ERROR: Pushing to SVN mirror remote '{mirror_remote}' is disabled!" >&2
+    echo "[git2svn pre-push guard] This remote is mirrored from SVN. Pushing directly causes svn2git to diverge." >&2
+    echo "[git2svn pre-push guard] To publish your changes to SVN, run:" >&2
+    echo "    git svn-push   (or: git2svn replay)" >&2
+    echo "[git2svn pre-push guard] To collaborate on feature branches or PRs, push to your developer remote instead." >&2
+    echo "" >&2
+    exit 1
 fi
 # --- END GIT2SVN PRE-PUSH GUARD ---
 """

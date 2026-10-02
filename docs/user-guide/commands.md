@@ -194,6 +194,7 @@ git2svn setup /path/to/svn
    - `git config alias.svn-push`: Replays trunk to SVN, fetches SVN mirror, and safely resets trunk *only* if `trunk` matches `svn-mirror/trunk` (guarded by `git diff --quiet`).
    - `git config alias.svn-pull`: Fetches SVN mirror, fast-forwards trunk if clean, and automatically rebases local commits if unpushed work exists on trunk.
    - `git config alias.svn-status`: Inspects synchronization health, pending commits, and workspace state via `git2svn status`.
+6. **Installs Pre-Push Hook Guard:** Automatically installs `.git/hooks/pre-push` to block all direct `git push` commands targeting the SVN mirror remote (`origin` or `svn-mirror`), preventing history divergence with `svn2git` while allowing pushes to other collaboration remotes (forks/PRs).
 
 ---
 
