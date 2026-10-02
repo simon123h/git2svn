@@ -6,6 +6,7 @@ to a local Subversion (SVN) working copy.
 from __future__ import annotations
 
 from .cli import build_parser, main, parse_cli_args
+from .clone import derive_repo_name, run_clone
 from .colors import ColoredLogFormatter, TerminalColor
 from .completion import get_completion_script, install_completion, run_completion
 from .core import Synchronizer, resolve_sync_range
@@ -64,6 +65,8 @@ __all__ = [
     "get_completion_script",
     "install_completion",
     "run_setup",
+    "run_clone",
+    "derive_repo_name",
     "run_init_mirror",
     "is_git_svn_available",
     "get_git_svn_version",

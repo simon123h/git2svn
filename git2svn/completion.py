@@ -30,7 +30,7 @@ _git2svn_completions() {
         cword=$COMP_CWORD
     }
 
-    local commands="stage diff replay switch setup init-mirror status clean doctor completion"
+    local commands="stage diff replay switch setup clone init-mirror status clean doctor completion"
     local common_opts="--git-dir -g --svn-dir -s --svn-url --dry-run -n --verbose -v --color -V --version -h --help"
 
     # Find the active subcommand (if any)
@@ -38,7 +38,7 @@ _git2svn_completions() {
     local i=1
     while [ $i -lt $cword ]; do
         case "${words[i]}" in
-            stage|diff|replay|switch|setup|init-mirror|status|clean|doctor|completion)
+            stage|diff|replay|switch|setup|clone|init-mirror|status|clean|doctor|completion)
                 cmd="${words[i]}"
                 break
                 ;;
@@ -86,6 +86,9 @@ _git2svn_completions() {
                 ;;
             replay)
                 COMPREPLY=( $(compgen -W "$common_opts --copy --continue --abort --skip --force -y --yes -i --interactive" -- "$cur") )
+                ;;
+            clone)
+                COMPREPLY=( $(compgen -W "$common_opts --origin-url --mirror-remote" -- "$cur") )
                 ;;
             init-mirror)
                 COMPREPLY=( $(compgen -W "$common_opts --stdlayout -T --trunk -b --branches -t --tags --prefix -r --revision --no-fetch" -- "$cur") )
@@ -162,6 +165,7 @@ _git2svn() {
         'replay:Sequentially port Git commits into SVN history'
         'switch:Switch SVN working copy to a different branch'
         'setup:Automate initial repository configuration and aliases'
+        'clone:Clone an SVN-to-Git mirror repository and automatically configure git2svn'
         'status:Inspect synchronization health and pending commits'
         'clean:Revert uncommitted changes and clear SVN locks'
         'init-mirror:Bootstrap a local Subversion mirror repository using git-svn'
@@ -216,6 +220,14 @@ _git2svn() {
                     _arguments \
                         $common_opts \
                         '1:SVN target:_files'
+                    ;;
+                clone)
+                    _arguments \
+                        $common_opts \
+                        '--origin-url[Secondary team Git remote URL]:git url:' \
+                        '--mirror-remote[Remote name for mirror repository]:remote name:' \
+                        '1:Mirror Git URL:_urls' \
+                        '2:Target directory:_files -/'
                     ;;
                 init-mirror)
                     _arguments \
@@ -324,6 +336,7 @@ complete -c git2svn -n __fish_git2svn_needs_command -a diff -d "Inspect uncommit
 complete -c git2svn -n __fish_git2svn_needs_command -a replay -d "Sequentially port Git commits into SVN history"
 complete -c git2svn -n __fish_git2svn_needs_command -a switch -d "Switch SVN working copy to a different branch"
 complete -c git2svn -n __fish_git2svn_needs_command -a setup -d "Automate initial repository configuration and aliases"
+complete -c git2svn -n __fish_git2svn_needs_command -a clone -d "Clone an SVN-to-Git mirror repository and automatically configure git2svn"
 complete -c git2svn -n __fish_git2svn_needs_command -a status -d "Inspect synchronization health and pending commits"
 complete -c git2svn -n __fish_git2svn_needs_command -a clean -d "Revert uncommitted changes and clear SVN locks"
 complete -c git2svn -n __fish_git2svn_needs_command -a init-mirror -d "Bootstrap a local Subversion mirror repository using git-svn"
@@ -354,6 +367,10 @@ complete -c git2svn -n "__fish_git2svn_using_command switch" -a "(__fish_git2svn
 
 # setup
 complete -c git2svn -n "__fish_git2svn_using_command setup" -r -d "SVN target"
+
+# clone
+complete -c git2svn -n "__fish_git2svn_using_command clone" -l origin-url -r -d "Secondary team Git remote URL"
+complete -c git2svn -n "__fish_git2svn_using_command clone" -l mirror-remote -r -d "Remote name for mirror repository"
 
 # init-mirror
 complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -l stdlayout -d "Use standard Subversion layout"

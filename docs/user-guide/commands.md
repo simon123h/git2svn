@@ -440,7 +440,42 @@ git2svn init-mirror https://svn.example.com/repo/myproject my-project --stdlayou
 
 ---
 
-## 10. Command: `completion`
+## 10. Command: `clone`
+
+Clones an SVN-to-Git mirror repository using `--origin svn-mirror` (or a custom name), automatically runs `git2svn setup <svn-url>` inside the clone to provision the managed SVN working copy, and optionally configures a secondary team Git remote (e.g. GitLab/GitHub) as `origin`:
+
+```bash
+# Clone mirror, configure managed SVN workspace, and set secondary team Git remote:
+git2svn clone git@gitlab.com:mirrors/my-project.git my-project \
+    --svn-url https://svn.example.com/repo/my-project/trunk \
+    --origin-url git@github.com:my-org/my-project.git
+
+# Clone mirror with default target directory derived from URL:
+git2svn clone https://gitlab.com/mirrors/my-project.git \
+    --svn-url https://svn.example.com/repo/my-project/trunk
+```
+
+### What `clone` does automatically:
+1. **Directory Pre-check:** Verifies the destination path does not already exist with conflicting contents.
+2. **Git Mirror Clone:** Executes `git clone <mirror-url> <target-dir> --origin svn-mirror` (or `--mirror-remote <name>`).
+3. **Automated Setup:** Automatically executes `git2svn setup <svn-url>` in the cloned repository:
+   - Configures `git2svn.svnUrl`, `git2svn.svnDir` (`.git/git2svn/svn_wc`), and `git2svn.mirrorRemote`.
+   - Checks out the managed SVN working copy.
+   - Installs pre-push protection hook (`.git/hooks/pre-push`).
+   - Configures productivity aliases (`git svn-pull`, `git svn-push`, `git svn-status`).
+4. **Secondary Remote Setup:** If `--origin-url` is specified, registers the secondary team repository as `origin`.
+
+### Options:
+- `mirror_url`: URL of the SVN-to-Git mirror repository to clone from.
+- `directory`: Optional destination folder (default: derived from repository URL).
+- `--svn-url <url>`: Authoritative Subversion repository URL to configure with `git2svn setup`.
+- `--origin-url <url>`: Optional secondary developer Git remote URL to configure as `origin`.
+- `--mirror-remote <name>`: Remote name for the mirror repository (default: `svn-mirror`).
+- `-n`, `--dry-run`: Preview planned actions without cloning or executing commands.
+
+---
+
+## 11. Command: `completion`
 
 Generates standalone shell tab-completion scripts for `bash`, `zsh`, or `fish`. Autocompletes subcommands, options, and dynamically suggests Git branches, tags, and SVN branch names.
 

@@ -18,12 +18,16 @@ flowchart TD
 Depending on your organization's infrastructure, you can set up your mirror in one of two ways:
 
 ### Approach A: Server-Side Mirror (DevOps / SubGit / all-fast-export)
-If your team already maintains a centralized GitLab/GitHub mirror that automatically syncs from Subversion, simply clone the Git repository and run `git2svn setup`:
+If your team already maintains a centralized GitLab/GitHub mirror that automatically syncs from Subversion, you can clone and configure the repository in a single command using `git2svn clone`:
 ```bash
-git clone git@github.com:my-org/my-project.git
+git2svn clone git@gitlab.com:mirrors/my-project.git my-project \
+    --svn-url https://svn.example.com/repo/my-project/trunk \
+    --origin-url git@github.com:my-org/my-project.git
 cd my-project
-git2svn setup https://svn.example.com/repo/my-project/trunk
 ```
+This automatically clones the mirror using `--origin svn-mirror`, runs `git2svn setup`, and adds your team's development repository as `origin`.
+
+*(Alternatively, you can manually run `git clone git@github.com:my-org/my-project.git && cd my-project && git2svn setup https://svn.example.com/repo/my-project/trunk`).*
 
 ### Approach B: Local Mirror via `git2svn init-mirror` (No DevOps Server Required)
 If you do not have a server-side mirror daemon, you can bootstrap a turnkey local mirror directly from Subversion using official `git-svn`:

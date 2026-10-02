@@ -263,6 +263,46 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to SVN working copy or SVN repository URL (optional if already configured or set via --svn-dir/--svn-url)",
     )
 
+    # clone
+    parser_clone = subparsers.add_parser(
+        "clone",
+        parents=[common_parser],
+        help="Clone an SVN-to-Git mirror repository and automatically configure git2svn",
+        description=(
+            "Clones an SVN-to-Git mirror repository using --origin svn-mirror (or custom name),\n"
+            "automatically runs 'git2svn setup <svn-url>' in the clone, and optionally registers\n"
+            "a secondary developer Git remote (e.g. your team's GitLab/GitHub repository) as 'origin'."
+        ),
+    )
+    parser_clone.add_argument(
+        "mirror_url",
+        type=str,
+        metavar="MIRROR_URL",
+        help="URL of the SVN-to-Git mirror repository to clone from",
+    )
+    parser_clone.add_argument(
+        "directory",
+        nargs="?",
+        type=Path,
+        default=None,
+        metavar="DIRECTORY",
+        help="Target directory for the cloned repository (default: derived from repository URL)",
+    )
+    parser_clone.add_argument(
+        "--origin-url",
+        type=str,
+        default=None,
+        metavar="GIT_URL",
+        help="Optional secondary team Git remote URL to configure as 'origin'",
+    )
+    parser_clone.add_argument(
+        "--mirror-remote",
+        type=str,
+        default="svn-mirror",
+        metavar="NAME",
+        help="Remote name for the mirror repository (default: 'svn-mirror')",
+    )
+
     # init-mirror
     parser_mirror = subparsers.add_parser(
         "init-mirror",
@@ -462,12 +502,34 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         from_revision=None,
         no_fetch=False,
         replay_action=None,
+        mirror_url=None,
+        directory=None,
+        origin_url=None,
+        mirror_remote="svn-mirror",
     )
     return parser.parse_args(argv, namespace=namespace)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_cli_args(argv)
+
+    if args.command == "clone":
+        from .clone import run_clone
+
+        color_mode = getattr(args, "color", None) or "auto"
+        svn_target = getattr(args, "svn_url", None) or getattr(args, "svn_dir", None)
+        if not svn_target:
+            print("Error: --svn-url <svn-url> is required for 'git2svn clone'", file=sys.stderr)
+            return 1
+        return run_clone(
+            mirror_url=args.mirror_url,
+            svn_url=str(svn_target),
+            target_dir=getattr(args, "directory", None),
+            origin_url=getattr(args, "origin_url", None),
+            mirror_remote=getattr(args, "mirror_remote", "svn-mirror"),
+            dry_run=args.dry_run,
+            color_mode=color_mode,
+        )
 
     git_dir = args.git_dir
     if not git_dir and args.command == "replay" and getattr(args, "replay_action", None):

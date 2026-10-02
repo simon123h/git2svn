@@ -367,6 +367,26 @@ flowchart TD
   - **High Architectural Cohesion:** Keeps `git2svn` lightweight, maintainable, and strictly focused on deterministic staging and replaying.
   - **Robustness:** Leverages the battle-tested stability of Git's official `git-svn` bridge while solving its notorious user-experience shortcomings.
 
+---
+
+### ADR-25: Automated Mirror Cloning & Onboarding (`git2svn clone`)
+* **Context:** In organizations using a dual-remote model (a central SVN mirror alongside a team Git remote like GitHub/GitLab), onboarding a developer required manually executing multiple error-prone shell steps:
+  1. `git clone <mirror-url> <dir> --origin svn-mirror`
+  2. `cd <dir>`
+  3. `git2svn setup <svn-url>`
+  4. `git remote add origin <team-git-url>`
+  Developers frequently wrapped these manual commands in one-off bash scripts, risking subtle misconfigurations (e.g. naming the mirror remote `origin` instead of `svn-mirror`, failing to wire up tracking aliases, or omitting pre-push protection hooks).
+* **Decision:**
+  1. Provide a first-class `git2svn clone <mirror-url> [directory] --svn-url <svn-url>` command.
+  2. Automatically name the mirror remote `--origin svn-mirror` (configurable via `--mirror-remote`).
+  3. Automatically run `git2svn setup` within the cloned repository, initializing `.git/git2svn/svn_wc`, `pull.ff=only`, `git2svn.mirrorRemote`, and productivity aliases (`git svn-pull`, `git svn-push`, `git svn-status`).
+  4. Accept an optional `--origin-url <team-git-url>` to configure the team's secondary Git remote cleanly in the same step.
+* **Consequences:**
+  - Replaces custom local bash scripts with a standardized, tested CLI command.
+  - Ensures every clone is immediately protected against accidental pushes to the mirror tracking branch.
+  - Seamlessly bridges the gap between external mirrors and local SVN working copies.
+
+
 
 
 
