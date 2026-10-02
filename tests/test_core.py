@@ -995,12 +995,13 @@ class TestSynchronizer(unittest.TestCase):
             ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
         ).stdout.strip()
 
+        init_branch = self.git_repo.get_current_branch()
         subprocess.run(["git", "checkout", "-b", "side_branch"], cwd=self.git_path, check=True, capture_output=True)
         (self.git_path / "side.txt").write_text("side")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "side commit"], cwd=self.git_path, check=True)
 
-        subprocess.run(["git", "checkout", "main"], cwd=self.git_path, check=True, capture_output=True)
+        subprocess.run(["git", "checkout", init_branch], cwd=self.git_path, check=True, capture_output=True)
         (self.git_path / "main.txt").write_text("main")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "main commit"], cwd=self.git_path, check=True)
