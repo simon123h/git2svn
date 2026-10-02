@@ -305,19 +305,36 @@ class Synchronizer:
         queue_start = time.perf_counter()
         pad_width = len(str(total_commits))
 
-        # Check recent SVN commit log messages to detect already committed commits
-        recent_svn_msgs: List[str] = []
-        if not force and not self.dry_run:
-            recent_svn_msgs = self.svn.get_recent_log_messages(limit=max(25, len(commits) * 2))
+        # Check recent SVN commit log messages to detect already committed commits.
+        # Find how many commits from the start of our replay queue match consecutive SVN commits.
+        skip_count = 0
+        if not force and not self.dry_run and commits:
+            recent_svn_msgs = [
+                m.strip() for m in self.svn.get_recent_log_messages(limit=max(25, len(commits) * 2)) if m.strip()
+            ]
+            git_msgs = [self.git.get_commit_message(h).strip() for h in commits]
+
+            # In SVN log, messages are newest-first: [newest_svn, ..., oldest_svn].
+            # In Git replay queue, commits are chronological: [c0, c1, c2, ...].
+            # If c0..cK were replayed to SVN, the most recent SVN commit (recent_svn_msgs[0])
+            # is cK, recent_svn_msgs[1] is cK-1, ..., up to recent_svn_msgs[k] is c0.
+            # We search for the longest prefix of git_msgs [0..k] that matches
+            # reversed recent_svn_msgs ending at the latest SVN commit (recent_svn_msgs[0]).
+            for k in range(len(git_msgs), 0, -1):
+                candidate_prefix = git_msgs[:k]
+                if len(recent_svn_msgs) >= k and recent_svn_msgs[:k] == candidate_prefix[::-1]:
+                    skip_count = k
+                    break
 
         for idx, commit_hash in enumerate(commits, start=start_index):
+            commit_offset = idx - start_index
             commit_msg = self.git.get_commit_message(commit_hash)
             first_line = commit_msg.splitlines()[0] if commit_msg else ""
             progress_prefix = f"[{idx:>{pad_width}}/{total_commits}] Applying {commit_hash[:8]}: {first_line}"
             logger.info(progress_prefix)
 
-            # Auto-skip if exact commit message already exists in recent SVN log entries
-            if not force and commit_msg.strip() in [m.strip() for m in recent_svn_msgs if m.strip()]:
+            # Auto-skip if within the consecutive prefix of already committed SVN entries
+            if commit_offset < skip_count:
                 skip_tag = self.color.skip_badge("[SKIP]")
                 skip_notice = (
                     f"{skip_tag} [{idx:>{pad_width}}/{total_commits}] {commit_hash[:8]} '{first_line}' "
@@ -329,7 +346,7 @@ class Synchronizer:
                     sys.stdout.write(skip_notice)
                 sys.stdout.flush()
                 logger.info(
-                    "Commit %s '%s' matches recent SVN log entry. Auto-skipped (use --force to override).",
+                    "Commit %s '%s' matches consecutive SVN log prefix. Auto-skipped (use --force to override).",
                     commit_hash[:8],
                     first_line,
                 )

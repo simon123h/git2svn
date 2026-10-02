@@ -150,13 +150,15 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
 * **Context:** Developers frequently work iteratively on feature branches: committing changes, running `git2svn replay main..feature`, authoring further commits on the same feature branch, and running `git2svn replay main..feature` again before the upstream SVN mirror has synced back to `main`. When re-running `replay` across the full range, earlier commits in the branch are already present in Subversion. Re-applying those patches leads to failed patch applications (`.rej` artifacts) or redundant duplicate commits.
 * **Decision:**
   1. Before executing the replay queue, query the most recent SVN commit log messages using `svn log --xml -l <limit>`.
-  2. For each Git commit in the queue, inspect whether its exact commit message already exists in the recent SVN log entries.
-  3. If matched, print an informative `[SKIP]` notice and advance to the next commit in the queue without attempting patch application or SVN commit.
-  4. Provide a `--force` CLI option on `git2svn replay` to bypass this check if a developer intentionally wishes to apply commits with identical commit messages.
+  2. Perform **ordered consecutive prefix matching**: inspect the chronological Git commits against the most recent SVN log entries in reverse order (`[newest_svn, ..., oldest_svn]`).
+  3. Only skip the contiguous sequence of commits starting from the head of the branch that have already been committed to SVN. If multiple commits share identical messages (e.g. repeated `"style: formatted"`), each is consumed in order; only the instances already committed in SVN are skipped.
+  4. Once a Git commit has no counterpart in SVN, all subsequent commits in the queue are executed.
+  5. Provide a `--force` CLI option on `git2svn replay` to bypass this check if a developer intentionally wishes to re-apply already committed changes.
 * **Consequences:**
   - **Safe Iterative Replays:** Running `git2svn replay main..feature` multiple times on an evolving branch becomes idempotent and avoids spurious patch conflicts.
+  - **Resilient to Duplicate Messages:** Avoids naive set-membership false skips when multiple commits have identical messages (e.g. `"style: formatted"`).
   - **Decoupled from Upstream Mirror Latency:** Developers do not need to wait for `svn2git` or CI sync jobs to complete before continuing work and replaying new commits.
-  - **Zero Database State Needed:** Relies on Subversion's actual repository log as the authoritative source of truth, avoiding local metadata tracking corruption.
+  - **Zero Database State Needed:** Relies on Subversion's actual repository log as the authoritative source of truth, avoiding local metadata tracking corruption or commit hash trailer desynchronization after CRLF conversion.
 
 
 

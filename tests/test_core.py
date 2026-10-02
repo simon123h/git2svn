@@ -812,6 +812,49 @@ class TestSynchronizer(unittest.TestCase):
                 self.assertEqual(mock_stage_force.call_count, 2)
                 self.assertEqual(mock_commit_force.call_count, 2)
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_with_identical_messages_only_skips_committed_instance(self, mock_svn_cmd):
+        """Verify that identical commit messages (e.g. 'style: formatted') only skip the committed prefix."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Base commit
+        f = self.git_path / "code.txt"
+        f.write_text("v1\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # Commit 1: "style: formatted" (already replayed to SVN)
+        f.write_text("v2\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "style: formatted"], cwd=self.git_path, check=True)
+
+        # Commit 2: "style: formatted" (new commit on branch with same message!)
+        f.write_text("v3\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "style: formatted"], cwd=self.git_path, check=True)
+        c2_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # SVN log currently only has ONE "style: formatted" at the top
+        with patch.object(
+            self.svn_ws,
+            "get_recent_log_messages",
+            return_value=["style: formatted", "init"],
+        ):
+            with (
+                patch.object(self.sync_mgr, "_patch_and_stage_commit") as mock_stage,
+                patch.object(self.svn_ws, "commit") as mock_commit,
+            ):
+                # Only the first "style: formatted" must be skipped.
+                # The second "style: formatted" (c2_hash) MUST be staged and committed!
+                self.sync_mgr.replay(base_hash, c2_hash, force=False)
+                mock_stage.assert_called_once_with(c2_hash)
+                mock_commit.assert_called_once_with("style: formatted")
+
 
 if __name__ == "__main__":
     unittest.main()
