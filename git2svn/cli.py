@@ -300,14 +300,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # doctor
-    subparsers.add_parser(
+    parser_doctor = subparsers.add_parser(
         "doctor",
         parents=[common_parser],
         help="Run pre-flight diagnostics on Git, SVN, hooks, and repository configuration",
         description=(
             "Inspect system prerequisites, Git/SVN CLI binaries, repository configuration,\n"
-            "pre-push hook guard, and SVN working copy connectivity/health."
+            "pre-push hook guard, and SVN working copy connectivity/health.\n"
+            "Optionally pass --fix to automatically repair configuration issues, aliases, and locks."
         ),
+    )
+    parser_doctor.add_argument(
+        "--fix",
+        action="store_true",
+        default=False,
+        help="Automatically repair fixable configuration issues, missing hooks, aliases, and locks",
     )
 
     # completion
@@ -365,6 +372,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         diff=False,
         stat=False,
         purge=False,
+        fix=False,
         install=False,
         replay_action=None,
     )
@@ -410,6 +418,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             svn_dir=getattr(args, "svn_dir", None),
             svn_url=getattr(args, "svn_url", None),
             color=TerminalColor(color_mode),
+            fix=getattr(args, "fix", False),
         )
 
     if not git_repo.is_valid_repo():

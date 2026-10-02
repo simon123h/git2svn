@@ -9,7 +9,7 @@ from .cli import build_parser, main, parse_cli_args
 from .colors import ColoredLogFormatter, TerminalColor
 from .completion import get_completion_script, install_completion, run_completion
 from .core import Synchronizer
-from .doctor import CheckResult, Doctor, run_doctor
+from .doctor import CheckResult, Doctor, FixResult, run_doctor
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
 from .patcher import Patcher
@@ -57,6 +57,7 @@ __all__ = [
     "Doctor",
     "run_doctor",
     "CheckResult",
+    "FixResult",
     "run_completion",
     "get_completion_script",
     "install_completion",

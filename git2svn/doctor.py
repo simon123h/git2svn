@@ -10,9 +10,11 @@ from typing import Dict, List, Optional
 
 from .colors import TerminalColor
 from .git import GitRepo
+from .setup import install_pre_push_hook
 from .state import load_replay_session
 from .svn import (
     SvnWorkspace,
+    checkout_working_copy,
     find_svn_binary,
     get_default_managed_svn_dir,
 )
@@ -28,6 +30,16 @@ class CheckResult:
     message: str
     details: List[str] = field(default_factory=list)
     hint: Optional[str] = None
+
+
+@dataclass
+class FixResult:
+    """Represents an automatic remediation action performed by doctor --fix."""
+
+    name: str
+    message: str
+    success: bool = True
+    error: Optional[str] = None
 
 
 class Doctor:
@@ -566,6 +578,142 @@ class Doctor:
             message="No interrupted or paused replay session",
         )
 
+    def apply_fixes(self) -> List[FixResult]:
+        """
+        Automatically remediate fixable repository and workspace configurations:
+        - Auto-configure git2svn.mirrorRemote if remotes exist in git
+        - Set pull.ff = only
+        - Configure recommended git aliases (git svn-push, git svn-pull, git svn-status)
+        - Install / fix executable permissions on pre-push hook guard (.git/hooks/pre-push)
+        - Checkout managed SVN working copy if svnUrl is configured but working copy does not exist
+        - Run svn cleanup if working copy is locked
+        """
+        fixes: List[FixResult] = []
+
+        if self.git.is_valid_repo():
+            # 1. Mirror Remote auto-detection
+            mirror = self.git.get_config("git2svn.mirrorRemote")
+            remotes = self.git.get_remotes()
+            if not mirror and remotes:
+                if "svn-mirror" in remotes:
+                    chosen_mirror = "svn-mirror"
+                elif "origin" in remotes:
+                    chosen_mirror = "origin"
+                else:
+                    chosen_mirror = remotes[0]
+                self.git.set_config("git2svn.mirrorRemote", chosen_mirror)
+                fixes.append(
+                    FixResult("Mirror Remote", f"Auto-detected and configured git2svn.mirrorRemote = {chosen_mirror}")
+                )
+
+            # 2. Fast-Forward policy
+            pull_ff = self.git.get_config("pull.ff")
+            if pull_ff != "only":
+                self.git.set_config("pull.ff", "only")
+                fixes.append(FixResult("Fast-Forward Policy", "Configured pull.ff = only"))
+
+            # 3. Recommended Git Aliases
+            aliases = ["alias.svn-push", "alias.svn-pull", "alias.svn-status"]
+            missing_aliases = [a for a in aliases if not self.git.get_config(a)]
+            if missing_aliases:
+                local_branches = self.git.get_local_branches()
+                detected_trunk = (
+                    "trunk"
+                    if "trunk" in local_branches
+                    else (
+                        "main"
+                        if "main" in local_branches
+                        else ("master" if "master" in local_branches else (self.git.get_current_branch() or "trunk"))
+                    )
+                )
+                effective_mirror = self.git.get_config("git2svn.mirrorRemote") or "origin"
+                remote_branches = self.git.get_remote_branches()
+                mirror_branch = f"{effective_mirror}/{detected_trunk}"
+                for cand in [
+                    f"{effective_mirror}/{detected_trunk}",
+                    f"{effective_mirror}/trunk",
+                    f"{effective_mirror}/main",
+                    f"{effective_mirror}/master",
+                ]:
+                    if cand in remote_branches:
+                        mirror_branch = cand
+                        break
+
+                push_script = (
+                    f"!f() {{ git2svn replay && git fetch {effective_mirror} && git checkout {detected_trunk} && "
+                    f"if git diff --quiet {detected_trunk} {mirror_branch}; then "
+                    f"git reset --hard {mirror_branch}; "
+                    f"else echo '[git svn-push] Warning: {detected_trunk} differs from {mirror_branch}. Not resetting.' >&2; fi; }}; f"
+                )
+                pull_script = (
+                    f"!f() {{ git fetch {effective_mirror} && git checkout {detected_trunk} && "
+                    f"if ! git merge --ff-only {mirror_branch} 2>/dev/null; then "
+                    f"echo '[git svn-pull] Fast-forward not possible (local commits on {detected_trunk}). Rebasing onto {mirror_branch}...'; "
+                    f"git rebase {mirror_branch}; fi; }}; f"
+                )
+                status_script = "!git2svn status"
+
+                if "alias.svn-push" in missing_aliases:
+                    self.git.set_config("alias.svn-push", push_script)
+                if "alias.svn-pull" in missing_aliases:
+                    self.git.set_config("alias.svn-pull", pull_script)
+                if "alias.svn-status" in missing_aliases:
+                    self.git.set_config("alias.svn-status", status_script)
+
+                fixes.append(FixResult("Git Aliases", "Configured git svn-push, svn-pull, svn-status"))
+
+            # 4. Pre-push Hook Guard
+            hook_file = self.git.repo_dir / ".git" / "hooks" / "pre-push"
+            hook_needs_fix = False
+            if not hook_file.exists():
+                hook_needs_fix = True
+            else:
+                content = hook_file.read_text(encoding="utf-8", errors="replace")
+                if "# --- START GIT2SVN PRE-PUSH GUARD ---" not in content:
+                    hook_needs_fix = True
+                elif sys.platform != "win32" and not os.access(hook_file, os.X_OK):
+                    hook_needs_fix = True
+
+            if hook_needs_fix:
+                effective_mirror = self.git.get_config("git2svn.mirrorRemote") or "origin"
+                install_pre_push_hook(self.git, effective_mirror)
+                fixes.append(
+                    FixResult(
+                        "Pre-push Hook Guard",
+                        f"Installed and made executable (.git/hooks/pre-push, protects '{effective_mirror}')",
+                    )
+                )
+
+        # 5. SVN Working Copy auto-checkout (if svnUrl configured but working copy missing)
+        svn_dir, svn_url = self._resolve_svn_paths()
+        if svn_dir and not svn_dir.exists() and svn_url:
+            try:
+                checkout_working_copy(svn_url, svn_dir)
+                fixes.append(FixResult("Working Copy Presence", f"Checked out managed SVN working copy to {svn_dir}"))
+            except Exception as e:
+                fixes.append(
+                    FixResult(
+                        "Working Copy Presence",
+                        f"Failed to checkout SVN repository: {e}",
+                        success=False,
+                        error=str(e),
+                    )
+                )
+
+        # 6. SVN Working Copy lock cleanup
+        if svn_dir and svn_dir.exists():
+            ws = SvnWorkspace(svn_dir)
+            if ws.is_valid_workspace():
+                try:
+                    res = ws.run_cmd(["status"], check=False)
+                    if "locked" in res.stderr.lower() or "cleanup" in res.stderr.lower():
+                        ws.cleanup()
+                        fixes.append(FixResult("SVN Cleanup", f"Executed 'svn cleanup' in {svn_dir} to release locks"))
+                except Exception:
+                    pass
+
+        return fixes
+
     def run_diagnostics(self) -> List[CheckResult]:
         """Execute all diagnostic checks and return structured results."""
         results: List[CheckResult] = []
@@ -580,12 +728,27 @@ class Doctor:
         results.append(self.check_replay_session())
         return results
 
-    def report(self) -> int:
+    def report(self, fix: bool = False) -> int:
         """Execute checks, print colored diagnostic output, and return exit code (0 = success, 1 = failure)."""
-        results = self.run_diagnostics()
         c = self.color
 
-        print(f"\n{c.bold('git2svn Doctor')} - Pre-flight Diagnostic Check\n")
+        if fix:
+            print(f"\n{c.bold('git2svn Doctor')} - Pre-flight Diagnostic & Auto-Remediation\n")
+            fixes = self.apply_fixes()
+            print(f"{c.bold_cyan('[Applying Automatic Fixes]')}")
+            if fixes:
+                for f in fixes:
+                    if f.success:
+                        print(f"  {c.fixed_badge()} {f.name}: {f.message}")
+                    else:
+                        print(f"  {c.fail_badge()} {f.name}: {f.message}")
+            else:
+                print(f"  {c.ok_badge()} No automatic fixes required.")
+            print()
+        else:
+            print(f"\n{c.bold('git2svn Doctor')} - Pre-flight Diagnostic Check\n")
+
+        results = self.run_diagnostics()
 
         categories: Dict[str, List[CheckResult]] = {}
         for r in results:
@@ -636,7 +799,8 @@ def run_doctor(
     svn_dir: Optional[Path | str] = None,
     svn_url: Optional[str] = None,
     color: Optional[TerminalColor] = None,
+    fix: bool = False,
 ) -> int:
     """Entry point for git2svn doctor command."""
     doctor = Doctor(git_repo, svn_dir=svn_dir, svn_url=svn_url, color=color)
-    return doctor.report()
+    return doctor.report(fix=fix)

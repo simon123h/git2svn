@@ -99,8 +99,8 @@ git2svn replay --continue
 git2svn clean
 git2svn clean --purge
 
-# 8. Run pre-flight environment & configuration diagnostics
-git2svn doctor
+# 8. Run pre-flight environment & configuration diagnostics (or auto-remediation)
+git2svn doctor          # or: git2svn doctor --fix
 
 # 9. Enable shell tab-completion (bash, zsh, fish)
 eval "$(git2svn completion bash)"   # or: git2svn completion --install

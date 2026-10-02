@@ -107,6 +107,9 @@ class TerminalColor:
     def ok_badge(self, text: str = "[OK]    ") -> str:
         return self.bold_green(text)
 
+    def fixed_badge(self, text: str = "[FIXED] ") -> str:
+        return self.bold_green(text)
+
     def fail_badge(self, text: str = "[FAIL]  ") -> str:
         return self.bold_red(text)
 

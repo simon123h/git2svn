@@ -306,6 +306,63 @@ class TestDoctor(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("git2svn Doctor", stdout.getvalue())
 
+    def test_apply_fixes_config_and_aliases(self):
+        doctor = Doctor(self.git_repo, color=self.color)
+        self.assertIsNone(self.git_repo.get_config("pull.ff"))
+        self.assertIsNone(self.git_repo.get_config("alias.svn-push"))
+
+        fixes = doctor.apply_fixes()
+        self.assertTrue(len(fixes) >= 2)
+        self.assertEqual(self.git_repo.get_config("pull.ff"), "only")
+        self.assertIsNotNone(self.git_repo.get_config("alias.svn-push"))
+        self.assertIsNotNone(self.git_repo.get_config("alias.svn-pull"))
+        self.assertIsNotNone(self.git_repo.get_config("alias.svn-status"))
+
+        hook_path = self.git_dir / ".git" / "hooks" / "pre-push"
+        self.assertTrue(hook_path.is_file())
+        self.assertIn("# --- START GIT2SVN PRE-PUSH GUARD ---", hook_path.read_text(encoding="utf-8"))
+
+    def test_apply_fixes_mirror_remote_detection(self):
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://example.com/mirror.git"],
+            cwd=self.git_dir,
+            check=True,
+            capture_output=True,
+        )
+        doctor = Doctor(self.git_repo, color=self.color)
+        self.assertIsNone(self.git_repo.get_config("git2svn.mirrorRemote"))
+
+        fixes = doctor.apply_fixes()
+        mirror_fix = next(f for f in fixes if f.name == "Mirror Remote")
+        self.assertIn("origin", mirror_fix.message)
+        self.assertEqual(self.git_repo.get_config("git2svn.mirrorRemote"), "origin")
+
+    def test_apply_fixes_managed_svn_checkout(self):
+        managed_dir = self.path / "managed_svn_auto"
+        doctor = Doctor(
+            self.git_repo,
+            svn_dir=managed_dir,
+            svn_url="http://svn.example.com/trunk",
+            color=self.color,
+        )
+        with patch("git2svn.doctor.checkout_working_copy") as mock_checkout:
+            fixes = doctor.apply_fixes()
+            mock_checkout.assert_called_once_with("http://svn.example.com/trunk", managed_dir)
+            presence_fix = next(f for f in fixes if f.name == "Working Copy Presence")
+            self.assertTrue(presence_fix.success)
+
+    def test_report_with_fix_flag(self):
+        doctor = Doctor(self.git_repo, color=self.color)
+        stdout = io.StringIO()
+        with patch("sys.stdout", stdout):
+            code = doctor.report(fix=True)
+        # Even with fix applied, no SVN workspace exists in fresh temp repo, so code is 1
+        self.assertEqual(code, 1)
+        out = stdout.getvalue()
+        self.assertIn("Pre-flight Diagnostic & Auto-Remediation", out)
+        self.assertIn("[Applying Automatic Fixes]", out)
+        self.assertIn("[FIXED]", out)
+
 
 if __name__ == "__main__":
     unittest.main()

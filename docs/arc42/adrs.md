@@ -230,9 +230,17 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
      - **Repository Configuration & Safety:** `git2svn.mirrorRemote` presence, tracking branch existence, `pull.ff=only` policy, productivity aliases (`git svn-push`, `git svn-pull`, `git svn-status`), and pre-push hook guard executable status.
      - **Replay State:** Active or paused multi-commit replay session detection.
   3. Output categorized results with color badges (`[OK]`, `[WARN]`, `[FAIL]`) and actionable resolution hints.
-  4. Return exit code `0` when all critical checks pass (advising on recommendations if warnings exist) and `1` if any critical failure occurs.
+  4. Provide an automated remediation flag (`--fix`):
+     - Automatically configures `git2svn.mirrorRemote` from detected remotes (`origin`, `svn-mirror`).
+     - Automatically sets `pull.ff = only`.
+     - Configures missing productivity aliases (`alias.svn-push`, `alias.svn-pull`, `alias.svn-status`).
+     - Installs and sets executable permissions on the pre-push hook guard (`.git/hooks/pre-push`).
+     - Auto-checks out missing managed SVN working copies when `git2svn.svnUrl` is configured.
+     - Automatically executes `svn cleanup` to release stale working copy locks.
+  5. Return exit code `0` when all critical checks pass (advising on recommendations if warnings exist) and `1` if any critical failure occurs.
 * **Consequences:**
   - **Rapid Troubleshooting & Triage:** Users and teams can diagnose setup, connectivity, and configuration issues instantly with a single command.
+  - **Zero-Friction Self-Healing:** The `--fix` flag resolves misconfigurations, missing hooks, and locked copies automatically in seconds.
   - **Proactive Failure Prevention:** Identifies missing safety hooks, unmerged branches, or lock issues before initiating synchronization or replay workflows.
   - **Self-Documenting & Actionable:** Every warning or failure provides exact remedy instructions (e.g. running `git2svn setup`, installing hooks, or switching branches).
 

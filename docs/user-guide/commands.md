@@ -302,9 +302,21 @@ Runs pre-flight diagnostics to inspect your environment, verify tool prerequisit
 # Run diagnostics on the current repository and workspace:
 git2svn doctor
 
+# Automatically repair fixable issues (aliases, pull.ff, hooks, locks, checkout):
+git2svn doctor --fix
+
 # Check a specific Git repository or SVN working copy:
 git2svn doctor --git-dir /path/to/repo --svn-dir /path/to/svn
 ```
+
+### Automated Remediation (`--fix`):
+Passing `--fix` attempts safe, automated repair of common workspace and configuration problems:
+- **Missing or broken pre-push hook guard:** Installs `.git/hooks/pre-push` and marks it executable (`chmod +x`).
+- **`pull.ff` policy unset:** Configures `git config pull.ff only` to prevent accidental merge commits.
+- **Missing aliases:** Automatically creates `alias.svn-push`, `alias.svn-pull`, and `alias.svn-status`.
+- **Missing mirror remote:** Auto-detects and sets `git2svn.mirrorRemote` from detected remotes (`origin` or `svn-mirror`).
+- **Managed working copy missing:** Automatically checks out the working copy if `git2svn.svnUrl` is configured.
+- **Stale working copy locks:** Runs `svn cleanup` to release locks.
 
 ### What `doctor` diagnoses:
 - **Git Environment:**
@@ -330,6 +342,7 @@ git2svn doctor --git-dir /path/to/repo --svn-dir /path/to/svn
 
 ### Diagnostic Badges & Exit Codes:
 - `[OK]   `: The check passed completely.
+- `[FIXED]`: An issue was automatically remediated by `--fix`.
 - `[WARN] `: Non-critical recommendation or missing optional feature (hints provided on how to resolve).
 - `[FAIL] `: Critical failure blocking synchronization (actionable remediation provided).
 
