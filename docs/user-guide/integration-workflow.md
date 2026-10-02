@@ -39,6 +39,60 @@ This single command:
 
 ---
 
+## 0.1 `git2svn` vs. Native `git svn dcommit`: Why Pair Them Together?
+
+A natural question when using `git-svn` as a mirror is: *Why not just use `git svn dcommit` to send changes back to SVN?*
+
+While `git svn fetch` is the gold standard for **ingesting** SVN history into Git (`SVN -> Git`), using `git svn dcommit` for **exporting** (`Git -> SVN`) introduces severe friction in modern development workflows:
+
+| Characteristic | Native `git svn dcommit` | `git2svn` (`replay` / `stage`) |
+| :--- | :--- | :--- |
+| **Commit Hash Integrity** | **Destructive**: Rewrites the SHA-1 commit hashes of your local Git branch to inject `git-svn-id:` footers. Breaks cherry-picks and pushes to remote Git branches. | **Non-Destructive**: Reads Git commits and ports changes into an SVN working copy. Your Git history and commit SHAs remain completely untouched. |
+| **Staging & Manual Review** | **Impossible**: Commits immediately and permanently to SVN. No way to inspect uncommitted changes in TortoiseSVN or run local pre-commit hooks. | **Supported via `git2svn stage`**: Leaves the SVN working copy uncommitted for manual inspection, diff reviews, or squash commits. |
+| **Squash & Range Support** | Can only commit all pending linear commits individually. | Supports single commits, explicit ranges (`main..feature`), and squashing (`stage <range>`). |
+| **Conflict Handling** | Leaves Git in a confusing detached rebase state if a conflict occurs during commit. | **Stateful**: `replay` pauses at the exact failing commit, creates `.rej` files, and provides `--continue`, `--skip`, `--abort`, and `-i` (interactive mode). |
+| **Enterprise SVN Client Rules** | Operates via low-level Perl bindings, sometimes bypassing corporate SVN client hooks or auth setups. | Operates through your standard Subversion CLI/TortoiseSVN client, respecting all corporate client configs and credentials. |
+
+### The Division of Labor
+
+`git-svn` and `git2svn` are designed to work together symbiotically:
+
+```mermaid
+flowchart LR
+    subgraph Upstream ["Central Subversion Server"]
+        SVN_SERVER["SVN Server"]
+    end
+
+    subgraph Mirror ["Ingestion (SVN -> Git)"]
+        GIT_SVN["git svn fetch"]
+        TRACKING["refs/remotes/svn-mirror/trunk"]
+    end
+
+    subgraph Dev ["Developer Space"]
+        LOCAL_TRUNK["Local trunk / main"]
+        FEAT["feature/my-work"]
+    end
+
+    subgraph Export ["Export (Git -> SVN)"]
+        G2S["git2svn replay / stage"]
+        WC["SVN Working Copy"]
+    end
+
+    SVN_SERVER -->|"1. Ingest (handled by git-svn)"| GIT_SVN
+    GIT_SVN --> TRACKING
+    TRACKING -->|"2. git svn-pull (rebase)"| LOCAL_TRUNK
+    LOCAL_TRUNK -->|"3. git checkout -b"| FEAT
+    FEAT -->|"4. git merge --ff-only"| LOCAL_TRUNK
+    LOCAL_TRUNK -->|"5. Export (handled by git2svn)"| G2S
+    G2S --> WC
+    WC -->|"6. svn commit"| SVN_SERVER
+```
+
+- **`git-svn`** handles the hard part of **reading Subversion**: revisions, author mappings, and branches/tags mapping.
+- **`git2svn`** handles the hard part of **writing to Subversion**: atomic staging, non-destructive replay, line-ending normalization, and conflict resolution.
+
+---
+
 ## 1. Branch Roles
 
 1. **`svn-mirror/trunk` (Remote-tracking branch):** Read-only mirror updated incrementally by your SVN-to-Git synchronization tool. Represents official SVN truth.

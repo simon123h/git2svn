@@ -336,6 +336,38 @@ flowchart TD
   - **Turnkey Onboarding:** Replaces a multi-step manual setup with a single self-contained command (`git2svn init-mirror https://svn.example.com/repo`).
   - **Seamless Workflow Integration:** Productivity aliases (`git svn-pull` and `git svn-push`) abstract away the dual-system synchronizations.
 
+---
+
+### ADR-24: Scope Boundary — Delegating SVN Ingestion (`SVN -> Git`) to `git-svn` / External Mirrors
+* **Context:**
+  A common question arises during tool evolution: *Should `git2svn` implement its own standalone `svn2git` engine to pull SVN revisions directly into Git history without requiring external tools?*
+  Subversion history ingestion is notoriously complex. It involves:
+  1. Translating arbitrary Subversion directory copying conventions (`svn copy ^/trunk ^/branches/release-1.0`) into Git branch topologies and commit DAGs.
+  2. Parsing and transforming Subversion metadata properties (`svn:ignore` -> `.gitignore`, `svn:executable` -> Git mode `100755`, `svn:special` -> symlinks).
+  3. Handling directory-level changes, keyword substitutions (`$Id$`), and author identity mapping.
+  4. Managing incremental synchronization state across partial revisions, interrupted network connections, and server timeouts.
+* **Decision:**
+  1. **Strict Single Responsibility:** `git2svn` will deliberately focus *exclusively* on export and staging: **`Git -> SVN`**.
+  2. **No In-House Ingestion Engine:** `git2svn` will **not** implement a custom `svn2git` parser or mirror generator.
+  3. **Complementary Ecosystem Delegation:** Delegate the ingestion problem (`SVN -> Git`) to battle-tested existing tools:
+     - For server-side shared mirrors: Dedicated enterprise tools such as SubGit, `svn2git`, or `all-fast-export`.
+     - For local workstation developer mirrors: The official, upstream-maintained `git-svn` utility (automated turnkey via `git2svn init-mirror`).
+  4. **Interoperability Over Duplication:** Position `git2svn` as the missing, non-destructive export complement to `git-svn` and SVN mirror tracking branches.
+* **Architecture Boundary Matrix:**
+
+| Responsibility | Handled By | Rationale |
+| :--- | :--- | :--- |
+| **`SVN -> Git` (Ingestion)** | `git-svn` / SubGit / `svn2git` | 20+ years of protocol edge cases, property translations, and revision DAG tracking already solved. |
+| **`Git -> SVN` (Staging / Review)** | `git2svn stage` | Allows uncommitted staging in SVN working copy for TortoiseSVN or manual squash review (impossible with `git svn dcommit`). |
+| **`Git -> SVN` (Sequential Export)** | `git2svn replay` | Preserves original Git commit hashes, provides stateful conflict resolution (`--continue`/`--skip`), and prevents commit rewriting. |
+| **Workspace Wiring & Automation** | `git2svn setup` / `git2svn init-mirror` | Provides zero-friction configuration and automated sync aliases without reinventing the bridge. |
+
+* **Consequences:**
+  - **Zero Reinvention of the Wheel:** Avoids thousands of lines of fragile Subversion protocol parsing and edge-case handling.
+  - **High Architectural Cohesion:** Keeps `git2svn` lightweight, maintainable, and strictly focused on deterministic staging and replaying.
+  - **Robustness:** Leverages the battle-tested stability of Git's official `git-svn` bridge while solving its notorious user-experience shortcomings.
+
+
 
 
 

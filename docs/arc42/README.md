@@ -252,4 +252,4 @@ Detailed architectural concepts are documented in **[Cross-Cutting Concepts](con
 
 ## 9. Architecture Decisions (ADRs)
 
-Architecture Decision Records (ADR-1 through ADR-12) are documented in **[Architecture Decision Records](adrs.md)**.
+Architecture Decision Records (ADR-1 through ADR-24) are documented in **[Architecture Decision Records](adrs.md)**.
