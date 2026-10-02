@@ -63,7 +63,13 @@ class TestGit2SvnE2E(unittest.TestCase):
 
     def _git_commit(self, msg: str) -> str:
         subprocess.run([GIT_BIN, "add", "."], cwd=self.git_dir, check=True)
-        subprocess.run([GIT_BIN, "commit", "-m", msg], cwd=self.git_dir, check=True, capture_output=True)
+        subprocess.run(
+            [GIT_BIN, "commit", "-F", "-"],
+            input=msg.encode("utf-8"),
+            cwd=self.git_dir,
+            check=True,
+            capture_output=True,
+        )
         res = subprocess.run(
             [GIT_BIN, "rev-parse", "HEAD"],
             cwd=self.git_dir,
@@ -93,15 +99,17 @@ class TestGit2SvnE2E(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
         )
-        # Detailed log with messages
+        # Detailed log with messages using --xml for reliable cross-platform UTF-8 output
         res_full = subprocess.run(
-            [SVN_BIN, "log", "-r", "1:HEAD"],
+            [SVN_BIN, "log", "--xml", "-r", "1:HEAD"],
             cwd=self.svn_wc_dir,
             check=True,
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
         )
         return [res.stdout, res_full.stdout]
 
