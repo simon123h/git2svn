@@ -66,11 +66,11 @@ git2svn replay svn-mirror/trunk..trunk
 *(By default, `replay` automatically executes `svn update` upon completion, ensuring your SVN working copy base revision is bumped to `HEAD`.)*
 
 > [!TIP]
-> If you configure `git config git2svn.defaultRange "svn-mirror/trunk..trunk"`, you can simply run:
+> If you have `git2svn.mirrorRemote` configured (done automatically by `git2svn setup`), you can simply run:
 > ```bash
 > git2svn replay
 > ```
-> regardless of what feature branch you currently have checked out, safely and automatically shipping only the commits on `trunk`!
+> `git2svn` dynamically targets `<mirrorRemote>/<svn-branch>..HEAD` based on your checked-out SVN working copy branch!
 
 ### 2.5 Sync Mirror & Clean Up
 Fetch updates from the authoritative SVN mirror tracking branch and align local `trunk`:
@@ -124,7 +124,7 @@ git config alias.svn-status "!git2svn status"
 - **Diff Guard on Push:** `git svn-push` checks `git diff --quiet trunk svn-mirror/trunk`. If any uncommitted or un-replayed differences remain between `trunk` and the mirror, it refuses to reset `trunk`.
 
 ### Daily Developer Experience:
-With these aliases configured alongside `git config git2svn.defaultRange "svn-mirror/trunk..trunk"`:
+With these aliases configured alongside `git2svn.mirrorRemote` (set automatically via `git2svn setup`):
 
 ```bash
 # Check synchronization health, tree states, and pending commits:

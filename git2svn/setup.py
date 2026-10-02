@@ -122,33 +122,31 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
             svn_cand = [c for c in candidates if any(k in c.lower() for k in ("svn", "mirror", "origin"))]
             detected_mirror = svn_cand[0] if svn_cand else candidates[0]
 
-    # 4. Apply Git configuration
+    # 4. Resolve mirror remote and configure Git settings
+    remotes = git_repo.get_remotes()
+    existing_mirror = git_repo.get_config("git2svn.mirrorRemote")
+    if existing_mirror and (existing_mirror in remotes or not remotes):
+        mirror_remote = existing_mirror
+    elif "svn-mirror" in remotes:
+        mirror_remote = "svn-mirror"
+    elif "origin" in remotes:
+        mirror_remote = "origin"
+    elif detected_mirror:
+        mirror_remote = detected_mirror.split("/")[0]
+    elif remotes:
+        mirror_remote = remotes[0]
+    else:
+        mirror_remote = "svn-mirror"
+
     # SVN directory path (use forward slashes for cross-platform consistency in git config)
     svn_dir_str = str(resolved_svn).replace("\\", "/")
     git_repo.set_config("git2svn.svnDir", svn_dir_str)
     if configured_url:
         git_repo.set_config("git2svn.svnUrl", configured_url)
+    git_repo.set_config("git2svn.mirrorRemote", mirror_remote)
     git_repo.set_config("pull.ff", "only")
 
-    default_range: Optional[str] = None
-    if detected_mirror and detected_trunk:
-        default_range = f"{detected_mirror}..{detected_trunk}"
-        git_repo.set_config("git2svn.defaultRange", default_range)
-
     # 5. Configure productivity aliases
-    mirror_remote = (
-        detected_mirror.split("/")[0]
-        if detected_mirror
-        else (
-            "origin"
-            if "origin/HEAD"
-            in git_repo.run_cmd(
-                ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin"], check=False
-            ).stdout
-            or any(b.startswith("origin/") for b in remote_branches)
-            else "svn-mirror"
-        )
-    )
     mirror_branch = detected_mirror or f"{mirror_remote}/{detected_trunk or 'trunk'}"
     trunk_name = detected_trunk or "trunk"
 
@@ -176,10 +174,8 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     if configured_url:
         print(f"  git2svn.svnUrl      = {configured_url}")
     print(f"  git2svn.svnDir      = {svn_dir_str}")
-    if default_range:
-        print(f"  git2svn.defaultRange= {default_range}")
-    else:
-        print("  git2svn.defaultRange= (not set; could not detect remote mirror branch)")
+    print(f"  git2svn.mirrorRemote= {mirror_remote}")
+    print(f"  sync range          = dynamic ({mirror_remote}/<svn-branch>..HEAD)")
     print("  pull.ff             = only")
     print(f"  alias.svn-push      = {push_script}")
     print(f"  alias.svn-pull      = {pull_script}")

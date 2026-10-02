@@ -110,7 +110,8 @@ class TestCli(unittest.TestCase):
 
         git_repo = git2svn.GitRepo(git_dir)
         self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(svn_dir).replace("\\", "/"))
-        self.assertEqual(git_repo.get_config("git2svn.defaultRange"), "svn-mirror/trunk..trunk")
+        self.assertEqual(git_repo.get_config("git2svn.mirrorRemote"), "svn-mirror")
+        self.assertIsNone(git_repo.get_config("git2svn.defaultRange"))
         self.assertIsNone(git_repo.get_config("git2svn.autoUpdate"))
         self.assertEqual(git_repo.get_config("pull.ff"), "only")
         self.assertIn("git2svn replay", git_repo.get_config("alias.svn-push"))
@@ -168,7 +169,8 @@ class TestCli(unittest.TestCase):
         self.assertEqual(res, 0)
 
         git_repo = git2svn.GitRepo(git_dir)
-        self.assertEqual(git_repo.get_config("git2svn.defaultRange"), "origin/trunk..trunk")
+        self.assertEqual(git_repo.get_config("git2svn.mirrorRemote"), "origin")
+        self.assertIsNone(git_repo.get_config("git2svn.defaultRange"))
         self.assertIn("git fetch origin", git_repo.get_config("alias.svn-pull"))
 
     def test_setup_prints_tip_when_no_mirror_detected(self):
@@ -264,7 +266,7 @@ class TestCli(unittest.TestCase):
             self.assertTrue(mock_sync_cls.called)
 
     def test_cli_missing_ref_errors(self):
-        """Verify stage and replay exit with code 1 if ref is missing and no defaultRange configured."""
+        """Verify stage and replay exit with code 1 if ref is missing and no dynamic range can be resolved."""
         svn_dir = self.path / "cli_err_svn"
         svn_dir.mkdir()
         (svn_dir / ".svn").mkdir()
@@ -380,7 +382,7 @@ class TestCli(unittest.TestCase):
             self.assertIn("Index: staged.txt", fake_out.getvalue())
 
     def test_stage_missing_ref_error(self):
-        """Verify error when stage is invoked without ref or configured defaultRange."""
+        """Verify error when stage is invoked without ref or resolvable dynamic range."""
         git_dir = self.path / "no_ref_git"
         git_dir.mkdir()
         subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
@@ -394,7 +396,7 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 1)
 
     def test_replay_missing_ref_error(self):
-        """Verify error when replay is invoked without ref or configured defaultRange."""
+        """Verify error when replay is invoked without ref or resolvable dynamic range."""
         git_dir = self.path / "no_ref_replay_git"
         git_dir.mkdir()
         subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)

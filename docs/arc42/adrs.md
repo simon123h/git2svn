@@ -180,13 +180,30 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
      - If the Git branch and SVN branch differ, `git2svn` displays a prominent warning badge and prompts for interactive confirmation (`Do you want to proceed? [y/N]: `), aborting if denied.
      - Provides `-y` / `--yes` / `--force` flags to bypass the prompt in automated/scripted workflows. In non-interactive environments (`sys.stdin.isatty() == False`), logs a warning and proceeds.
   3. **Dynamic Default Range Fallback:**
-     - When no range is supplied and `git2svn.defaultRange` is not configured, `git2svn` queries the active SVN working copy branch name (`<svn-branch>`).
+     - When no range is supplied, `git2svn` queries the active SVN working copy branch name (`<svn-branch>`).
      - Detects the mirror remote (`svn-mirror` or `origin`) and verifies whether `<mirror>/<svn-branch>` exists.
      - If found, dynamically calculates the replay range as `<mirror>/<svn-branch>..HEAD`.
 * **Consequences:**
   - **Accident Prevention:** Guards against accidental commits of Git feature branches into SVN trunk or vice-versa.
   - **Frictionless Branching:** Developers switch their SVN target branch with a single command without memorizing repository URLs.
   - **Smart Defaults:** `git2svn replay` "just works" on feature branches matching upstream SVN tracking branches without manual range specification.
+
+---
+
+### ADR-18: Mirror Remote Topology Configuration (`git2svn.mirrorRemote`) and Removal of `defaultRange`
+* **Context:** Previously, `git2svn setup` wrote a static `git2svn.defaultRange` (e.g. `svn-mirror/trunk..trunk`). This caused "branch sticking": when checking out a feature branch, running `git2svn replay` either attempted to replay `trunk` or required remembering manual range syntax (`git2svn replay svn-mirror/feature-a..HEAD`). Furthermore, a hardcoded range conflated topology (which remote is the SVN mirror) with runtime branch state (which branch is currently checked out) and created configuration bloat.
+* **Decision:**
+  1. Promote **`git2svn.mirrorRemote`** as the primary configuration key created by `git2svn setup` (auto-detecting `svn-mirror`, `origin`, etc.).
+  2. **Fully remove `git2svn.defaultRange`**: No longer written by setup, no longer parsed by CLI or core logic, and removed from documentation.
+  3. Dynamic range calculation (`resolve_sync_range`) automatically resolves:
+     $$\text{Sync Range} = \langle\text{mirrorRemote}\rangle/\langle\text{active-svn-branch}\rangle..\text{HEAD}$$
+  4. One-off non-standard mappings or mirrorless workflows specify the desired range directly on the command line (e.g., `git2svn replay base..HEAD`), keeping configuration minimal and predictable.
+  5. Both `status` and `replay`/`stage` share the unified `resolve_sync_range` resolver.
+* **Consequences:**
+  - **Zero Branch Friction:** Developers switch Git and SVN branches freely; `git2svn replay` and `git2svn status` always calculate the correct tracking range for the active branch automatically.
+  - **Topology Harmonization:** The pre-push hook guard and synchronization engine both reference `git2svn.mirrorRemote`.
+  - **Lean & Unified Mental Model:** Eliminates split-brain configuration between static ranges and dynamic mirror branches. All range overrides are explicit CLI arguments.
+
 
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .colors import ColoredLogFormatter, TerminalColor
-from .core import Synchronizer
+from .core import Synchronizer, resolve_sync_range
 from .git import GitRepo
 from .patcher import Patcher
 from .state import load_replay_state
@@ -243,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Configure repository settings for git2svn on a fresh clone.\n"
             "Automatically detects local trunk and remote SVN mirror tracking branches,\n"
-            "sets git2svn.svnDir, git2svn.defaultRange, git2svn.autoUpdate, pull.ff only,\n"
+            "sets git2svn.svnDir, git2svn.mirrorRemote, pull.ff only,\n"
             "and configures git alias.svn-push, alias.svn-pull, and alias.svn-status."
         ),
     )
@@ -277,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect synchronization health, pending commits, and workspace state",
         description=(
             "Display current state of Git repository, SVN working copy, in-progress replay,\n"
-            "and pending commits in the configured defaultRange."
+            "and pending commits in the active synchronization range."
         ),
     )
 
@@ -434,7 +434,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         color_mode=color_mode,
     )
 
-    # Fallback to git2svn.defaultRange or dynamic <mirror>/<svn_branch>..HEAD if ref1 is omitted
+    # Fallback to dynamic mirror remote range if ref1 is omitted
     ref1 = getattr(args, "ref1", None)
     ref2 = getattr(args, "ref2", None)
     if not ref1 and args.command in ("stage", "replay"):
@@ -442,22 +442,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.command == "replay" and getattr(args, "replay_action", None):
             pass
         else:
-            default_range = git_repo.get_config("git2svn.defaultRange")
-            if default_range:
-                ref1 = default_range
+            resolved_range = resolve_sync_range(git_repo, svn_workspace)
+            if resolved_range:
+                ref1 = resolved_range
                 ref2 = None
-                logger.info("Using configured default range from git2svn.defaultRange: '%s'", default_range)
-            else:
-                # Dynamic fallback: resolve SVN working copy branch and match against remotes
-                svn_branch = svn_workspace.get_current_branch_name()
-                remotes = git_repo.get_remotes()
-                mirror_remote = "svn-mirror" if "svn-mirror" in remotes else ("origin" if "origin" in remotes else None)
-                if mirror_remote:
-                    remote_ref = f"{mirror_remote}/{svn_branch}"
-                    # Check if remote ref exists in git repo
-                    if git_repo.ref_exists(remote_ref):
-                        ref1 = f"{remote_ref}..HEAD"
-                        logger.info("Using dynamic default range based on SVN target: '%s'", ref1)
+                logger.info("Using dynamic default range: '%s'", resolved_range)
 
     try:
         if args.command == "stage":
@@ -469,7 +458,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             if not ref1:
                 print(
                     "Error: stage requires a commit or range (e.g. 'git2svn stage main..feature') "
-                    "or 'git config git2svn.defaultRange <range>'.",
+                    "or a configured 'git2svn.mirrorRemote'.",
                     file=sys.stderr,
                 )
                 return 1
@@ -505,7 +494,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if not ref1:
                     print(
                         "Error: replay requires a commit or range unless using --continue, --abort, or --skip. "
-                        "You can also configure a default range with 'git config git2svn.defaultRange <range>'.",
+                        "Specify a commit/range or configure 'git2svn.mirrorRemote'.",
                         file=sys.stderr,
                     )
                     return 1

@@ -4,6 +4,7 @@ import logging
 from typing import List
 
 from .colors import TerminalColor
+from .core import resolve_sync_range
 from .git import GitRepo, parse_ref_arguments
 from .state import find_conflict_artifacts, load_replay_session
 from .svn import SvnError, SvnWorkspace
@@ -99,17 +100,17 @@ class StatusReporter:
             has_error = True
             print(f"  Tree      : {c.bold_red(f'Error: {e.args[0].splitlines()[0]}')}")
 
-        # 4. Synchronization Queue & Default Range
-        default_range = self.git.get_config("git2svn.defaultRange")
+        # 4. Synchronization Queue
+        sync_range = resolve_sync_range(self.git, self.svn)
         print(f"\n{c.bold_cyan('[Synchronization]')}")
-        if not default_range:
+        if not sync_range:
             print(
-                f"  Range     : {c.dim('Not configured')} (run 'git2svn setup' or 'git config git2svn.defaultRange <range>')"
+                f"  Range     : {c.dim('Not configured')} (run 'git2svn setup' or set 'git config git2svn.mirrorRemote <remote>')"
             )
         else:
-            print(f"  Range     : {c.bold(default_range)}")
+            print(f"  Range     : {c.bold(sync_range)}")
             try:
-                is_single, start_ref, end_ref = parse_ref_arguments(default_range)
+                is_single, start_ref, end_ref = parse_ref_arguments(sync_range)
                 if is_single:
                     commits = [start_ref] if self.git.ref_exists(start_ref) else []
                     merges: List[str] = []
@@ -148,7 +149,7 @@ class StatusReporter:
                     if len(commits) > 10:
                         print(f"              {c.dim(f'... and {len(commits) - 10} more')}")
             except Exception as e:
-                err_msg = f"Could not parse range '{default_range}': {e}"
+                err_msg = f"Could not parse range '{sync_range}': {e}"
                 print(f"  Error     : {c.bold_red(err_msg)}")
                 has_error = True
 

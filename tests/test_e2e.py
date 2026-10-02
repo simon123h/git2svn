@@ -239,8 +239,8 @@ class TestGit2SvnE2E(unittest.TestCase):
         self.assertIn("D       obsolete.txt", status)
         self.assertIn("A       brand_new.txt", status)
 
-    def test_e2e_snapshot_with_default_range(self):
-        """Test snapshot stage correctly resolves target ref when defaultRange is a range (e.g. origin/main..main)."""
+    def test_e2e_snapshot_defaults_to_head(self):
+        """Test snapshot stage correctly defaults to HEAD when ref is omitted."""
         # Create base file in SVN
         (self.svn_wc_dir / "base.txt").write_text("v1\n", encoding="utf-8")
         subprocess.run([SVN_BIN, "add", "base.txt"], cwd=self.svn_wc_dir, check=True)
@@ -248,14 +248,11 @@ class TestGit2SvnE2E(unittest.TestCase):
 
         # In Git, create base commit and feature commit
         (self.git_dir / "base.txt").write_text("v1\n", encoding="utf-8")
-        c1 = self._git_commit("feat: c1")
+        self._git_commit("feat: c1")
         (self.git_dir / "base.txt").write_text("v2\n", encoding="utf-8")
-        c2 = self._git_commit("feat: c2")
+        self._git_commit("feat: c2")
 
-        # Configure defaultRange as a range c1..c2
-        subprocess.run([GIT_BIN, "config", "git2svn.defaultRange", f"{c1}..{c2}"], cwd=self.git_dir, check=True)
-
-        # Run stage --snapshot without any ref (should use end ref of defaultRange: c2)
+        # Run stage --snapshot without any ref (should default to HEAD: c2)
         exit_code = cli_main(["stage", "--snapshot", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
         self.assertEqual(exit_code, 0)
         self.assertEqual((self.svn_wc_dir / "base.txt").read_text(encoding="utf-8"), "v2\n")
@@ -390,14 +387,12 @@ class TestGit2SvnE2E(unittest.TestCase):
 
         # Setup pending commit in Git
         f.write_text("status test modified\n", encoding="utf-8")
-        pending_hash = self._git_commit("feat: pending feature for status")
+        self._git_commit("feat: pending feature for status")
 
-        # Configure defaultRange and svnDir in Git config
-        subprocess.run(
-            [GIT_BIN, "config", "git2svn.defaultRange", f"{base_hash}..{pending_hash}"],
-            cwd=self.git_dir,
-            check=True,
-        )
+        # Configure mirrorRemote and svnDir in Git config
+        subprocess.run(["git", "remote", "add", "origin", "https://example.com/repo.git"], cwd=self.git_dir, check=True)
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/main", base_hash], cwd=self.git_dir, check=True)
+        subprocess.run([GIT_BIN, "config", "git2svn.mirrorRemote", "origin"], cwd=self.git_dir, check=True)
         subprocess.run(
             [GIT_BIN, "config", "git2svn.svnDir", str(self.svn_wc_dir)],
             cwd=self.git_dir,

@@ -410,8 +410,8 @@ class TestSynchronizer(unittest.TestCase):
         self.assertIn(["update"], called_args)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_replay_with_git_config_default_range(self, mock_svn_cmd):
-        """Verify git2svn replay with no ref arguments falls back to git2svn.defaultRange."""
+    def test_replay_with_dynamic_mirror_remote(self, mock_svn_cmd):
+        """Verify git2svn replay with no ref arguments dynamically resolves mirrorRemote/<branch>..HEAD."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
         # Create base commit
@@ -433,11 +433,12 @@ class TestSynchronizer(unittest.TestCase):
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "feat: on trunk"], cwd=self.git_path, check=True)
 
-        # Switch to another branch to ensure defaultRange is branch-independent
-        subprocess.run(["git", "checkout", "-b", "feature/other"], cwd=self.git_path, check=True)
-
-        # Configure defaultRange to base_hash..trunk
-        subprocess.run(["git", "config", "git2svn.defaultRange", f"{base_hash}..trunk"], cwd=self.git_path, check=True)
+        # Add remote 'svn-mirror' and tracking ref at base_hash
+        subprocess.run(
+            ["git", "remote", "add", "svn-mirror", "https://example.com/mirror.git"], cwd=self.git_path, check=True
+        )
+        subprocess.run(["git", "update-ref", "refs/remotes/svn-mirror/trunk", base_hash], cwd=self.git_path, check=True)
+        subprocess.run(["git", "config", "git2svn.mirrorRemote", "svn-mirror"], cwd=self.git_path, check=True)
 
         # Run replay without ref1 or ref2
         code = git2svn.main(
@@ -484,8 +485,8 @@ class TestSynchronizer(unittest.TestCase):
             self.assertIn(f"[1/1] Applying {feat_hash[:8]}: feat: progress indicator... OK (", output)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
-    def test_stage_with_git_config_default_range(self, mock_svn_cmd):
-        """Verify git2svn stage with no ref arguments falls back to git2svn.defaultRange."""
+    def test_stage_with_dynamic_mirror_remote(self, mock_svn_cmd):
+        """Verify git2svn stage with no ref arguments dynamically resolves mirrorRemote/<branch>..HEAD."""
         mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
 
         base_file = self.git_path / "stage_base.txt"
@@ -500,26 +501,27 @@ class TestSynchronizer(unittest.TestCase):
         feat_file.write_text("staged content\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "staged feat"], cwd=self.git_path, check=True)
-        feat_hash = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
-        ).stdout.strip()
 
+        # Configure mirrorRemote and remote tracking branch at base_hash
         subprocess.run(
-            ["git", "config", "git2svn.defaultRange", f"{base_hash}..{feat_hash}"], cwd=self.git_path, check=True
+            ["git", "remote", "add", "svn-mirror", "https://example.com/mirror.git"], cwd=self.git_path, check=True
         )
+        subprocess.run(["git", "update-ref", "refs/remotes/svn-mirror/trunk", base_hash], cwd=self.git_path, check=True)
+        subprocess.run(["git", "config", "git2svn.mirrorRemote", "svn-mirror"], cwd=self.git_path, check=True)
 
-        # Run stage without ref
-        code = git2svn.main(
-            [
-                "--git-dir",
-                str(self.git_path),
-                "--svn-dir",
-                str(self.svn_path),
-                "stage",
-            ]
-        )
-        self.assertEqual(code, 0)
-        self.assertEqual((self.svn_path / "stage_default.txt").read_text(), "staged content\n")
+        with patch.object(git2svn.SvnWorkspace, "get_current_branch_name", return_value="trunk"):
+            # Run stage without ref
+            code = git2svn.main(
+                [
+                    "--git-dir",
+                    str(self.git_path),
+                    "--svn-dir",
+                    str(self.svn_path),
+                    "stage",
+                ]
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual((self.svn_path / "stage_default.txt").read_text(), "staged content\n")
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_eol_preservation_on_crlf_target(self, mock_svn_cmd):

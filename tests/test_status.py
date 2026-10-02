@@ -26,6 +26,12 @@ class TestStatus(unittest.TestCase):
         self.patcher = git2svn.Patcher(self.svn_path)
         self.sync_mgr = git2svn.Synchronizer(self.git_repo, self.svn_workspace, self.patcher)
 
+        # Setup git remote origin and mirrorRemote config
+        subprocess.run(
+            ["git", "remote", "add", "origin", "https://example.com/origin.git"], cwd=self.git_path, check=True
+        )
+        self.git_repo.set_config("git2svn.mirrorRemote", "origin")
+
     def tearDown(self):
         self.temp_dir.cleanup()
 
@@ -37,11 +43,12 @@ class TestStatus(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "init commit"], cwd=self.git_path, check=True)
         head = self.git_repo.get_head_commit()
 
-        self.git_repo.set_config("git2svn.defaultRange", f"{head}..{head}")
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/trunk", head], cwd=self.git_path, check=True)
 
         with (
             patch.object(self.svn_workspace, "is_clean", return_value=True),
             patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
         ):
             code = self.sync_mgr.status()
             self.assertEqual(code, 0)
@@ -58,13 +65,13 @@ class TestStatus(unittest.TestCase):
         f2.write_text("feat\n")
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "feat: new feature"], cwd=self.git_path, check=True)
-        head = self.git_repo.get_head_commit()
 
-        self.git_repo.set_config("git2svn.defaultRange", f"{base}..{head}")
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/trunk", base], cwd=self.git_path, check=True)
 
         with (
             patch.object(self.svn_workspace, "is_clean", return_value=True),
             patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
         ):
             code = self.sync_mgr.status()
             self.assertEqual(code, 0)
@@ -91,13 +98,13 @@ class TestStatus(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "main commit"], cwd=self.git_path, check=True)
 
         subprocess.run(["git", "merge", "--no-ff", "side", "-m", "merge side"], cwd=self.git_path, check=True)
-        head = self.git_repo.get_head_commit()
 
-        self.git_repo.set_config("git2svn.defaultRange", f"{base}..{head}")
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/trunk", base], cwd=self.git_path, check=True)
 
         with (
             patch.object(self.svn_workspace, "is_clean", return_value=True),
             patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
         ):
             code = self.sync_mgr.status()
             self.assertEqual(code, 1)
@@ -135,34 +142,18 @@ class TestStatus(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_status.assert_called_once()
 
-    def test_status_missing_start_ref(self):
-        """Status warns when start_ref of range does not exist in Git."""
-        self.git_repo.set_config("git2svn.defaultRange", "nonexistent_branch..main")
+    def test_status_range_not_configured_when_remote_branch_missing(self):
+        """Status prints Not configured when remote tracking branch is absent."""
         with (
             patch.object(self.svn_workspace, "is_clean", return_value=True),
             patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
-            patch("sys.stdout") as mock_stdout,
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
+            patch("builtins.print") as mock_print,
         ):
             code = self.sync_mgr.status()
             self.assertEqual(code, 0)
-            self.assertTrue(any("nonexistent_branch" in str(c) for c in mock_stdout.mock_calls))
-
-    def test_status_missing_end_ref(self):
-        """Status warns when end_ref of range does not exist in Git."""
-        f = self.git_path / "base.txt"
-        f.write_text("base\n")
-        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
-        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
-        head = self.git_repo.get_head_commit()
-
-        self.git_repo.set_config("git2svn.defaultRange", f"{head}..nonexistent_end")
-        with (
-            patch.object(self.svn_workspace, "is_clean", return_value=True),
-            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
-            patch("sys.stdout"),
-        ):
-            code = self.sync_mgr.status()
-            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Not configured" in line for line in printed_lines))
 
     def test_status_more_than_ten_commits(self):
         """Status truncates list and prints '... and X more' when > 10 commits are pending."""
@@ -176,12 +167,12 @@ class TestStatus(unittest.TestCase):
             f.write_text(f"commit {i}\n")
             subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
             subprocess.run(["git", "commit", "-m", f"commit {i}"], cwd=self.git_path, check=True)
-        head = self.git_repo.get_head_commit()
-
-        self.git_repo.set_config("git2svn.defaultRange", f"{base}..{head}")
+        # Update origin/trunk ref to base so origin/trunk..HEAD resolves to base..HEAD
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/trunk", base], cwd=self.git_path, check=True)
         with (
             patch.object(self.svn_workspace, "is_clean", return_value=True),
             patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
             patch("builtins.print") as mock_print,
         ):
             code = self.sync_mgr.status()
@@ -222,6 +213,32 @@ class TestStatus(unittest.TestCase):
             self.assertEqual(code, 1)
             printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
             self.assertTrue(any("Error: Working copy locked" in line for line in printed_lines))
+
+    def test_status_with_dynamic_mirror_remote(self):
+        """Status dynamically resolves range when mirrorRemote is set."""
+        f = self.git_path / "init.txt"
+        f.write_text("hello\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=self.git_path, check=True)
+        head = self.git_repo.get_head_commit()
+
+        # Create dummy remote 'svn-mirror' and branch ref
+        subprocess.run(
+            ["git", "remote", "add", "svn-mirror", "https://example.com/mirror.git"], cwd=self.git_path, check=True
+        )
+        subprocess.run(["git", "update-ref", "refs/remotes/svn-mirror/trunk", head], cwd=self.git_path, check=True)
+        self.git_repo.set_config("git2svn.mirrorRemote", "svn-mirror")
+
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("svn-mirror/trunk..HEAD" in line for line in printed_lines))
 
 
 if __name__ == "__main__":

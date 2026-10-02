@@ -25,6 +25,26 @@ from .svn import SvnError, SvnWorkspace
 logger = logging.getLogger("git2svn")
 
 
+def resolve_sync_range(git_repo: GitRepo, svn_workspace: SvnWorkspace) -> Optional[str]:
+    """
+    Dynamically resolve default sync range as '<mirror_remote>/<svn_branch>..HEAD'.
+    Returns None if mirror remote is missing or remote tracking ref does not exist.
+    """
+    configured_remote = git_repo.get_config("git2svn.mirrorRemote")
+    mirror_remote = configured_remote
+    if not mirror_remote:
+        remotes = git_repo.get_remotes()
+        mirror_remote = "svn-mirror" if "svn-mirror" in remotes else ("origin" if "origin" in remotes else None)
+
+    if mirror_remote:
+        svn_branch = svn_workspace.get_current_branch_name()
+        remote_ref = f"{mirror_remote}/{svn_branch}"
+        if git_repo.ref_exists(remote_ref):
+            return f"{remote_ref}..HEAD"
+
+    return None
+
+
 class Synchronizer:
     """Coordinates Git extraction, patch/copy operations, and SVN staging."""
 

@@ -125,14 +125,14 @@ To protect developers from accidentally committing Git feature branch work onto 
   ```
 
 ### 2.6 Dynamic Default Range Resolution
-When `git2svn replay` or `git2svn stage` is invoked without explicit commit references and `git2svn.defaultRange` is not set:
+When `git2svn replay` or `git2svn stage` is invoked without explicit commit references:
 1. `git2svn` detects the active SVN working copy branch name (`<svn-branch>`).
 2. It locates the configured mirror remote (`svn-mirror` or `origin`).
 3. If `<mirror-remote>/<svn-branch>` exists in Git, `git2svn` dynamically calculates the range as:
    ```text
    <mirror-remote>/<svn-branch>..HEAD
    ```
-This allows running `git2svn replay` seamlessly on feature branches without needing to reconfigure `git2svn.defaultRange`.
+This allows running `git2svn replay` seamlessly on feature branches without needing manual range arguments.
 
 ---
 
@@ -242,7 +242,7 @@ git2svn setup /path/to/svn
 4. **Writes Git Configuration:**
    - `git config git2svn.svnDir <path/to/svn>`
    - `git config git2svn.svnUrl <url>` (if URL provided)
-   - `git config git2svn.defaultRange "<remote_branch>..<trunk_branch>"`
+   - `git config git2svn.mirrorRemote <mirror_remote>` (e.g. `svn-mirror` or `origin`)
    - `git config pull.ff only` (prevents accidental merge commits when pulling)
 5. **Configures Safe Productivity Aliases:**
    - `git config alias.svn-push`: Replays trunk to SVN, fetches SVN mirror, and safely resets trunk *only* if `trunk` matches `svn-mirror/trunk` (guarded by `git diff --quiet`).
@@ -254,7 +254,7 @@ git2svn setup /path/to/svn
 
 ## 6. Command: `status`
 
-Inspects synchronization health, pending commits in `git2svn.defaultRange`, and working tree states across both Git and Subversion.
+Inspects synchronization health, pending commits in the active synchronization range (`<mirrorRemote>/<svn-branch>..HEAD`), and working tree states across both Git and Subversion.
 
 ```bash
 git2svn status
@@ -263,7 +263,7 @@ git2svn status
 ### What `status` reports:
 - **Git Workspace:** Active branch, latest commit hash & subject, and working tree cleanliness.
 - **SVN Working Copy:** Path, target SVN URL, base revision, cleanliness, and lock status.
-- **Synchronization Queue:** Configured `git2svn.defaultRange`, pending commit count & titles, and linear history validation (warns if merge commits exist).
+- **Synchronization Queue:** Resolved sync range (showing whether dynamic or explicit override), pending commit count & titles, and linear history validation (warns if merge commits exist).
 - **In-Progress Replay:** State of paused replays (if a conflict occurred), remaining commits, active `.rej` conflict files, and actionable recovery commands (`--continue`, `--abort`, `--skip`).
 
 ### Exit Codes:

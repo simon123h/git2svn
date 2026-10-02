@@ -21,7 +21,7 @@ git2svn [-g/--git-dir <path>] [-s/--svn-dir <path>] [--svn-url <url>] [-n/--dry-
 | `--dry-run` | `-n` | — | `git2svn.dryRun` | `False` | Print actions (file copies, patches, SVN commands) without modifying disk. |
 | `--verbose` | `-v` | — | — | `False` | Print detailed debug logs and execution traces. |
 | `--copy` | — | — | `git2svn.copy` | `False` | Extract exact binary snapshots directly from Git object DB. |
-| `<ref1> [ref2]` | — | — | `git2svn.defaultRange` | None | Default revision or range (e.g. `origin/trunk..trunk` or `svn-mirror/trunk..trunk`) when omitted from CLI. |
+| — | — | — | `git2svn.mirrorRemote` | Auto (`svn-mirror` / `origin`) | Upstream Git remote mirroring Subversion for dynamic range resolution (`<mirror>/<svn-branch>..HEAD`). |
 
 ### 1.1 Recommended Onboarding: `git2svn setup`
 
@@ -35,7 +35,7 @@ git2svn setup https://svn.example.com/repo/trunk
 git2svn setup /path/to/svn
 ```
 
-This automatically detects tracking branches, configures `git2svn.svnDir`, `git2svn.svnUrl`, `git2svn.defaultRange`, `pull.ff only`, and installs Git aliases (`git svn-push`, `git svn-pull`, `git svn-status`).
+This automatically detects tracking branches, configures `git2svn.svnDir`, `git2svn.svnUrl`, `git2svn.mirrorRemote`, `pull.ff only`, and installs Git aliases (`git svn-push`, `git svn-pull`, `git svn-status`).
 
 #### Precedence Hierarchy:
 1. Explicit CLI arguments (`--svn-dir`, `--svn-url`, `--dry-run`, `--copy`, `--no-update` / `-u`)
