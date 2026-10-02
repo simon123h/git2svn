@@ -245,6 +245,12 @@ class GitRepo:
         res = self.run_cmd(["log", "-1", "--format=%B", commit_hash])
         return res.stdout.strip()
 
+    def get_commit_show(self, commit_hash: str, color: bool = True) -> str:
+        """Return formatted commit patch and diffstat."""
+        color_arg = "--color=always" if color else "--color=never"
+        res = self.run_cmd(["show", "--stat", "-p", color_arg, commit_hash], check=False)
+        return res.stdout
+
     def get_commit_range(self, start_ref: str, end_ref: str) -> List[str]:
         """Return list of commit hashes in chronological order (start_ref..end_ref)."""
         res = self.run_cmd(["rev-list", "--reverse", "--topo-order", f"{start_ref}..{end_ref}"])

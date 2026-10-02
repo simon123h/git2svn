@@ -261,6 +261,31 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Zero Third-Party Dependencies:** Implemented purely in the Python standard library and native POSIX shell syntax.
   - **Portable Across Shells:** Unifies the completion experience across Bash, Zsh, and Fish on Linux and macOS.
 
+---
+
+### ADR-22: Interactive Step-by-Step Commit Replay (`git2svn replay -i` / `--interactive`)
+* **Context:** When synchronizing multiple Git commits to Subversion via `git2svn replay`, changes are applied sequentially and committed automatically. When porting large or sensitive feature branches, developers need granular oversight to inspect diffs, skip specific commits, or pause execution cleanly without modifying Git history beforehand or risking unintentional SVN commits.
+* **Decision:**
+  1. Add an interactive flag (`-i` / `--interactive`) to `git2svn replay`, compatible with single commits, commit ranges, `--continue`, and `--skip`.
+  2. Require an interactive terminal (`sys.stdin.isatty()`); abort with a clear error if invoked in non-interactive environments (e.g. headless CI/CD).
+  3. Prompt before applying each commit in the replay queue with `[y]es / [s]kip / [a]ll / [d]iff / [q]uit / [?]`:
+     - `y` (or `yes` / enter): Apply patch, stage changes, and commit to SVN.
+     - `s` (or `skip`, `n`, `no`): Skip the current commit without staging or modifying SVN, advancing to the next commit.
+     - `a` (or `all`): Apply the current and all remaining commits without further prompts (switches to non-interactive mode for the session remainder).
+     - `d` (or `diff`): Display colorized unified diff and diffstat of the commit (`git show --stat -p`), then re-prompt for confirmation.
+     - `q` (or `quit`): Gracefully pause replay, persist state to `.svn/git2svn-replay.json` (`state="PAUSED"`), and provide resume hints.
+     - `?` (or `help`): Display command help legend and re-prompt.
+  4. Enable pausing and resuming:
+     - When quitting (`q`), the current unapplied commit and remaining queue are preserved.
+     - Resuming with `git2svn replay --continue` detects `state="PAUSED"` and resumes replay directly from the paused commit without requiring conflict artifacts.
+     - Resuming with `git2svn replay --skip` cleanly advances past the paused commit and resumes the remainder of the queue.
+     - Both `--continue` and `--skip` accept `-i` / `--interactive` to maintain interactive stepping.
+* **Consequences:**
+  - **Granular Control & Safety:** Developers inspect changes before they hit the shared Subversion repository.
+  - **Flexible Resumption:** Users can step away or pause a long replay and resume later with `--continue` or `--continue -i`.
+  - **Selective Cherry-Picking:** Developers can skip unneeded commits on the fly with `s` without rewriting Git history.
+  - **Consistent CLI & Autocompletion:** Supported across `bash`, `zsh`, and `fish` tab-completions.
+
 
 
 

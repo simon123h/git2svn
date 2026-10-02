@@ -46,6 +46,7 @@ class TestCompletion(unittest.TestCase):
         self.assertIn("complete -F _git2svn_completions git2svn", script)
         self.assertIn("stage", script)
         self.assertIn("replay", script)
+        self.assertIn("-i --interactive", script)
         self.assertIn("doctor", script)
         self.assertIn("completion", script)
 
@@ -54,6 +55,7 @@ class TestCompletion(unittest.TestCase):
         self.assertTrue(script.startswith("#compdef git2svn"))
         self.assertIn("stage:Stage changes", script)
         self.assertIn("replay:Sequentially port", script)
+        self.assertIn("(-i --interactive)", script)
         self.assertIn("doctor:Run pre-flight", script)
         self.assertIn("completion:Generate shell", script)
 
@@ -62,6 +64,7 @@ class TestCompletion(unittest.TestCase):
         self.assertIn("complete -c git2svn", script)
         self.assertIn("-a stage", script)
         self.assertIn("-a replay", script)
+        self.assertIn("-l interactive", script)
         self.assertIn("-a doctor", script)
         self.assertIn("-a completion", script)
 

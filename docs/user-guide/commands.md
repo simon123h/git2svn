@@ -134,6 +134,49 @@ When `git2svn replay` or `git2svn stage` is invoked without explicit commit refe
    ```
 This allows running `git2svn replay` seamlessly on feature branches without needing manual range arguments.
 
+### 2.7 Interactive Step-by-Step Replay (`-i` / `--interactive`)
+When replaying a multi-commit branch or sensitive commits, pass `-i` or `--interactive` to step through each revision before committing to Subversion:
+
+```bash
+git2svn replay origin/trunk..HEAD -i
+```
+
+Before each commit, `git2svn` displays the commit hash, commit message subject, and an interactive confirmation prompt:
+```text
+Apply commit 4c89ab12 (2/5): "feat(auth): add OAuth2 refresh token handling"?
+[y]es / [s]kip / [a]ll / [d]iff / [q]uit / [?] [y]: 
+```
+
+#### Available Interactive Actions:
+| Key | Command | Description |
+|---|---|---|
+| `y`, `yes`, `Enter` | **Apply** | Apply patch, stage changes in SVN, and commit with original message |
+| `s`, `skip`, `n` | **Skip** | Skip this commit without touching SVN, advancing to the next commit |
+| `a`, `all` | **Apply All** | Apply this and all remaining commits without prompting (turns off interactivity) |
+| `d`, `diff` | **Show Diff** | Display colorized diffstat and patch diff (`git show --stat -p`), then re-prompt |
+| `q`, `quit` | **Quit & Pause** | Pause replay cleanly and preserve state in `.svn/git2svn-replay.json` (`state="PAUSED"`) |
+| `?`, `help` | **Help** | Display the interactive command menu |
+
+#### Pausing & Resuming:
+If you quit (`q` or `Ctrl+C`) during an interactive replay session:
+- The session is saved cleanly in `PAUSED` state without generating conflict artifacts.
+- To resume replay from the paused commit:
+  ```bash
+  git2svn replay --continue
+  # Or resume with interactive prompting retained:
+  git2svn replay --continue -i
+  ```
+- To skip the paused commit and resume the rest of the queue:
+  ```bash
+  git2svn replay --skip
+  # Or interactively:
+  git2svn replay --skip -i
+  ```
+- To abort and revert any pending changes:
+  ```bash
+  git2svn replay --abort
+  ```
+
 ---
 
 ## 3. Command: `switch`
@@ -200,6 +243,8 @@ flowchart TD
 3. **Resume Replay:**
    ```bash
    git2svn replay --continue
+   # Or with interactive confirmation enabled:
+   git2svn replay --continue -i
    ```
    *This automatically commits the resolved changeset using the original Git commit message and proceeds with the rest of the queue.*
 
@@ -211,6 +256,8 @@ flowchart TD
 * **Skip:** Discards the failed commit entirely and continues with the next commit in the queue:
   ```bash
   git2svn replay --skip
+  # Or with interactive confirmation enabled:
+  git2svn replay --skip -i
   ```
 
 ---

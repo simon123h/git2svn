@@ -85,7 +85,7 @@ _git2svn_completions() {
                 COMPREPLY=( $(compgen -W "$common_opts --stat" -- "$cur") )
                 ;;
             replay)
-                COMPREPLY=( $(compgen -W "$common_opts --copy --continue --abort --skip --force -y --yes" -- "$cur") )
+                COMPREPLY=( $(compgen -W "$common_opts --copy --continue --abort --skip --force -y --yes -i --interactive" -- "$cur") )
                 ;;
             clean)
                 COMPREPLY=( $(compgen -W "$common_opts --purge" -- "$cur") )
@@ -199,6 +199,7 @@ _git2svn() {
                         '--skip[Skip failed commit and continue with next]' \
                         '--force[Bypass duplicate commit check]' \
                         '(-y --yes)'{-y,--yes}'[Automatically confirm branch mismatch prompt]' \
+                        '(-i --interactive)'{-i,--interactive}'[Interactive step-by-step confirmation for each commit]' \
                         '1:start ref:__git2svn_git_refs' \
                         '2:end ref:__git2svn_git_refs'
                     ;;
@@ -327,6 +328,7 @@ complete -c git2svn -n "__fish_git2svn_using_command replay" -l abort -d "Abort 
 complete -c git2svn -n "__fish_git2svn_using_command replay" -l skip -d "Skip failed commit and continue with next"
 complete -c git2svn -n "__fish_git2svn_using_command replay" -l force -d "Bypass duplicate commit check"
 complete -c git2svn -n "__fish_git2svn_using_command replay" -s y -l yes -d "Automatically confirm branch mismatch prompt"
+complete -c git2svn -n "__fish_git2svn_using_command replay" -s i -l interactive -d "Interactive step-by-step confirmation for each commit"
 complete -c git2svn -n "__fish_git2svn_using_command replay" -a "(__fish_git2svn_git_refs)" -d "Git reference"
 
 # switch

@@ -258,11 +258,16 @@ class Synchronizer:
         ref2: Optional[str] = None,
         force: bool = False,
         assume_yes: bool = False,
+        interactive: bool = False,
     ) -> None:
         """
         Replay a single commit or range of commits onto SVN, committing each with its Git message.
         If force=False, commits already present in recent SVN logs are automatically skipped.
+        If interactive=True, steps through each commit with confirmation and diff preview prompts.
         """
+        if interactive and not sys.stdin.isatty():
+            raise RuntimeError("Interactive replay requires an interactive terminal (stdin is not a tty).")
+
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
         target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
         self.show_identity_banner(target_spec)
@@ -280,7 +285,9 @@ class Synchronizer:
         if is_single:
             commit_hash = start_or_commit
             logger.info("Replaying single commit %s", commit_hash)
-            self._execute_replay_queue([commit_hash], total_commits=1, start_index=1, force=force)
+            self._execute_replay_queue(
+                [commit_hash], total_commits=1, start_index=1, force=force, interactive=interactive
+            )
         else:
             start_ref = start_or_commit
             assert end_ref is not None
@@ -298,10 +305,15 @@ class Synchronizer:
                 return
 
             logger.info("Starting replay of %d commit(s) from %s to %s...", len(commits), start_ref, end_ref)
-            self._execute_replay_queue(commits, total_commits=len(commits), start_index=1, force=force)
+            self._execute_replay_queue(
+                commits, total_commits=len(commits), start_index=1, force=force, interactive=interactive
+            )
 
-    def replay_continue(self) -> None:
+    def replay_continue(self, interactive: bool = False) -> None:
         """Resume an interrupted replay after user resolves conflicts."""
+        if interactive and not sys.stdin.isatty():
+            raise RuntimeError("Interactive replay requires an interactive terminal (stdin is not a tty).")
+
         session = load_replay_session(self.svn.workspace_dir)
         if not session:
             raise RuntimeError("No replay in progress. Nothing to continue.")
@@ -320,6 +332,14 @@ class Synchronizer:
                 f"Found rejected patch artifacts ({', '.join(rel_rejs)}). "
                 "Please resolve conflicts and delete .rej / .orig files before running --continue."
             )
+
+        # If paused by user (state == "PAUSED"), current_commit has NOT been staged/applied yet
+        if session.state == "PAUSED":
+            queue = [current_commit] + remaining
+            self._execute_replay_queue(
+                queue, total_commits=total, start_index=completed + 1, force=True, interactive=interactive
+            )
+            return
 
         # 2. Commit the resolved changes for the interrupted commit
         pad_width = len(str(total))
@@ -345,7 +365,9 @@ class Synchronizer:
 
         # 3. Resume remaining queue
         if remaining:
-            self._execute_replay_queue(remaining, total_commits=total, start_index=completed + 1)
+            self._execute_replay_queue(
+                remaining, total_commits=total, start_index=completed + 1, force=True, interactive=interactive
+            )
         else:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay completed successfully! All %d commits applied.", total)
@@ -365,8 +387,11 @@ class Synchronizer:
             clear_replay_state(self.svn.workspace_dir)
         logger.info("Replay aborted. SVN workspace reverted to last clean commit.")
 
-    def replay_skip(self) -> None:
+    def replay_skip(self, interactive: bool = False) -> None:
         """Skip current interrupted commit and proceed with remaining queue."""
+        if interactive and not sys.stdin.isatty():
+            raise RuntimeError("Interactive replay requires an interactive terminal (stdin is not a tty).")
+
         session = load_replay_session(self.svn.workspace_dir)
         if not session:
             raise RuntimeError("No replay in progress. Nothing to skip.")
@@ -382,15 +407,33 @@ class Synchronizer:
             clean_conflict_artifacts(self.svn.workspace_dir)
 
         if remaining:
-            self._execute_replay_queue(remaining, total_commits=total, start_index=completed + 2)
+            self._execute_replay_queue(
+                remaining, total_commits=total, start_index=completed + 2, force=True, interactive=interactive
+            )
         else:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay finished (last commit was skipped).")
 
+    def _show_commit_diff(self, commit_hash: str) -> None:
+        """Display diff and commit details."""
+        diff_text = self.git.get_commit_show(commit_hash, color=self.color.enabled)
+        if diff_text:
+            print("\n" + diff_text.rstrip() + "\n")
+        else:
+            print(f"(No diff available for {commit_hash})")
+
     def _execute_replay_queue(
-        self, commits: List[str], total_commits: int, start_index: int, force: bool = False
+        self,
+        commits: List[str],
+        total_commits: int,
+        start_index: int,
+        force: bool = False,
+        interactive: bool = False,
     ) -> None:
         """Execute a list of commits sequentially, catching conflicts and persisting state."""
+        if interactive and not sys.stdin.isatty():
+            raise RuntimeError("Interactive replay requires an interactive terminal (stdin is not a tty).")
+
         queue_start = time.perf_counter()
         pad_width = len(str(total_commits))
 
@@ -442,6 +485,86 @@ class Synchronizer:
                     first_line,
                 )
                 continue
+
+            if interactive:
+                should_skip = False
+                while True:
+                    prompt_str = (
+                        f"Apply commit {self.color.bold_cyan(commit_hash[:8])} "
+                        f'({idx}/{total_commits}): "{first_line}"?\n'
+                        f"[{self.color.bold('y')}]es / "
+                        f"[{self.color.bold('s')}]kip / "
+                        f"[{self.color.bold('a')}]ll / "
+                        f"[{self.color.bold('d')}]iff / "
+                        f"[{self.color.bold('q')}]uit / "
+                        f"[{self.color.bold('?')}] [y]: "
+                    )
+                    try:
+                        choice = input(prompt_str).strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        choice = "q"
+                        print()
+
+                    if choice in ("", "y", "yes"):
+                        break
+                    elif choice in ("s", "n", "skip", "no"):
+                        should_skip = True
+                        break
+                    elif choice in ("a", "all"):
+                        interactive = False
+                        break
+                    elif choice in ("d", "diff"):
+                        self._show_commit_diff(commit_hash)
+                        continue
+                    elif choice in ("q", "quit"):
+                        remaining = commits[idx - start_index + 1 :]
+                        state_data = ReplayState(
+                            git_dir=str(self.git.repo_dir),
+                            svn_dir=str(self.svn.workspace_dir),
+                            current_commit=commit_hash,
+                            current_commit_msg=commit_msg,
+                            remaining_commits=remaining,
+                            total_commits=total_commits,
+                            completed_commits=idx - 1,
+                            state="PAUSED",
+                        )
+                        if not self.dry_run:
+                            save_replay_state(self.svn.workspace_dir, state_data)
+                        paused_badge = self.color.paused_badge("[PAUSED]")
+                        print(
+                            f"\n{paused_badge} Replay paused at commit {commit_hash[:8]} ({idx}/{total_commits}).\n"
+                            f"To resume:\n"
+                            f"  git2svn replay --continue\n"
+                            f"  (or 'git2svn replay --continue -i' for interactive mode)\n"
+                            f"To abort:\n"
+                            f"  git2svn replay --abort\n"
+                        )
+                        return
+                    elif choice in ("?", "h", "help"):
+                        print(
+                            "\nAvailable commands:\n"
+                            "  y, yes  - Apply this commit to SVN and proceed\n"
+                            "  s, skip - Skip this commit and proceed to the next commit\n"
+                            "  a, all  - Apply this and all remaining commits without prompting\n"
+                            "  d, diff - Show colorized diffstat and patch for this commit\n"
+                            "  q, quit - Quit and pause replay (state is preserved to resume later)\n"
+                            "  ?, help - Show this help message\n"
+                        )
+                        continue
+                    else:
+                        print(f"Unknown choice '{choice}'. Please enter y, s, a, d, q, or ?.")
+
+                if should_skip:
+                    skip_tag = self.color.skip_badge("[SKIP]")
+                    skip_msg = (
+                        f"{skip_tag} [{idx:>{pad_width}}/{total_commits}] Skipping {commit_hash[:8]}: {first_line}\n"
+                    )
+                    if sys.stdout.isatty():
+                        sys.stdout.write(f"\r\033[K{skip_msg}")
+                    else:
+                        sys.stdout.write(skip_msg)
+                    sys.stdout.flush()
+                    continue
 
             # Interactive console progress output
             if sys.stdout.isatty():

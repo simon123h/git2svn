@@ -217,6 +217,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Automatically confirm prompt if Git branch and SVN working copy branch differ",
     )
+    parser_replay.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Interactive step-by-step replay prompting before each commit (allows [y]es, [s]kip, [a]ll, [d]iff, [q]uit)",
+    )
 
     # switch
     parser_switch = subparsers.add_parser(
@@ -374,6 +381,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         purge=False,
         fix=False,
         install=False,
+        interactive=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -547,12 +555,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(diff_output, end="")
         elif args.command == "replay":
             action = getattr(args, "replay_action", None)
+            interactive = getattr(args, "interactive", False)
             if action == "continue":
-                sync_mgr.replay_continue()
+                sync_mgr.replay_continue(interactive=interactive)
             elif action == "abort":
                 sync_mgr.replay_abort()
             elif action == "skip":
-                sync_mgr.replay_skip()
+                sync_mgr.replay_skip(interactive=interactive)
             else:
                 if not ref1:
                     print(
@@ -563,7 +572,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     return 1
                 force = getattr(args, "force", False)
                 assume_yes = getattr(args, "assume_yes", False)
-                sync_mgr.replay(ref1, ref2, force=force, assume_yes=assume_yes)
+                sync_mgr.replay(ref1, ref2, force=force, assume_yes=assume_yes, interactive=interactive)
         elif args.command == "switch":
             sync_mgr.switch(args.branch)
             return 0

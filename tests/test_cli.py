@@ -66,6 +66,15 @@ class TestCli(unittest.TestCase):
         self.assertEqual(args_force.command, "replay")
         self.assertTrue(args_force.force)
 
+        args_interactive = git2svn.parse_cli_args(["replay", "main..feature", "-i", "-s", "/path/to/svn"])
+        self.assertEqual(args_interactive.command, "replay")
+        self.assertTrue(args_interactive.interactive)
+
+        args_interactive_long = git2svn.parse_cli_args(["replay", "--interactive", "--continue", "-s", "/path/to/svn"])
+        self.assertEqual(args_interactive_long.command, "replay")
+        self.assertTrue(args_interactive_long.interactive)
+        self.assertEqual(args_interactive_long.replay_action, "continue")
+
     def test_version_cli(self):
         """Verify -V and --version flags output program version and exit with code 0."""
         for flag in ["-V", "--version"]:
@@ -659,7 +668,16 @@ class TestCli(unittest.TestCase):
         with patch("git2svn.Synchronizer.replay") as mock_replay:
             code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "replay", "-y"])
             self.assertEqual(code, 0)
-            mock_replay.assert_called_once_with("svn-mirror/trunk..HEAD", None, force=False, assume_yes=True)
+            mock_replay.assert_called_once_with(
+                "svn-mirror/trunk..HEAD", None, force=False, assume_yes=True, interactive=False
+            )
+
+        with patch("git2svn.Synchronizer.replay") as mock_replay:
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "replay", "-y", "-i"])
+            self.assertEqual(code, 0)
+            mock_replay.assert_called_once_with(
+                "svn-mirror/trunk..HEAD", None, force=False, assume_yes=True, interactive=True
+            )
 
     def test_doctor_args(self):
         """Verify doctor subcommand CLI parsing."""
