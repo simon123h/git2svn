@@ -236,6 +236,24 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Proactive Failure Prevention:** Identifies missing safety hooks, unmerged branches, or lock issues before initiating synchronization or replay workflows.
   - **Self-Documenting & Actionable:** Every warning or failure provides exact remedy instructions (e.g. running `git2svn setup`, installing hooks, or switching branches).
 
+---
+
+### ADR-21: Zero-Dependency Native Shell Tab-Completion (`git2svn completion`)
+* **Context:** Developers frequently interact with Git revisions, branches, and multi-argument subcommands. Without shell autocompletion, users must manually type complex subcommands, flags, and branch names, increasing friction and the risk of typographical errors.
+* **Decision:**
+  1. Provide a standalone `git2svn completion` subcommand capable of generating native completion scripts for `bash`, `zsh`, and `fish` without external dependencies.
+  2. Implement context-aware completions:
+     - Subcommands: `stage`, `diff`, `replay`, `switch`, `setup`, `status`, `clean`, `doctor`, `completion`.
+     - Common and subcommand-specific options (`--copy`, `--snapshot`, `--diff`, `--stat`, `--purge`, `--install`, etc.).
+     - Positional Git references: Dynamically queries local branches, tags, and remote tracking branches (`refs/heads/`, `refs/tags/`, `refs/remotes/`, `HEAD`) when inside a Git repository.
+     - SVN branch targets: Dynamically completes `trunk` and detected branches for `git2svn switch`.
+  3. Include an automated `--install` flag that detects the active shell and writes the completion script directly to the user's standard completions directory (`~/.local/share/bash-completion/completions/`, `~/.zsh/completion/`, or `~/.config/fish/completions/`).
+* **Consequences:**
+  - **Developer Velocity:** Tab completion for subcommands, flags, and branch names provides immediate discoverability and speed.
+  - **Zero Third-Party Dependencies:** Implemented purely in the Python standard library and native POSIX shell syntax.
+  - **Portable Across Shells:** Unifies the completion experience across Bash, Zsh, and Fish on Linux and macOS.
+
+
 
 
 

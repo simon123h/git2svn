@@ -684,6 +684,25 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_doctor.assert_called_once()
 
+    def test_completion_args(self):
+        """Verify completion subcommand CLI parsing."""
+        args = git2svn.parse_cli_args(["completion"])
+        self.assertEqual(args.command, "completion")
+        self.assertIsNone(args.shell)
+        self.assertFalse(args.install)
+
+        args_shell = git2svn.parse_cli_args(["completion", "zsh", "--install"])
+        self.assertEqual(args_shell.command, "completion")
+        self.assertEqual(args_shell.shell, "zsh")
+        self.assertTrue(args_shell.install)
+
+    def test_completion_command_execution(self):
+        """Verify completion command delegates to run_completion without requiring git repository."""
+        with patch("git2svn.completion.run_completion", return_value=0) as mock_comp:
+            code = git2svn.main(["completion", "bash"])
+            self.assertEqual(code, 0)
+            mock_comp.assert_called_once_with(shell="bash", install=False)
+
 
 if __name__ == "__main__":
     unittest.main()

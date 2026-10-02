@@ -102,7 +102,10 @@ git2svn clean --purge
 # 8. Run pre-flight environment & configuration diagnostics
 git2svn doctor
 
-# 9. Or use the built-in Git aliases created during setup:
+# 9. Enable shell tab-completion (bash, zsh, fish)
+eval "$(git2svn completion bash)"   # or: git2svn completion --install
+
+# 10. Or use the built-in Git aliases created during setup:
 git svn-push     # Replay trunk commits to SVN and fetch mirror
 git svn-pull     # Pull fresh SVN mirror commits & rebase local trunk
 git svn-status   # Run git2svn status

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .cli import build_parser, main, parse_cli_args
 from .colors import ColoredLogFormatter, TerminalColor
+from .completion import get_completion_script, install_completion, run_completion
 from .core import Synchronizer
 from .doctor import CheckResult, Doctor, run_doctor
 from .eol import detect_file_eol, normalize_file_eol
@@ -56,6 +57,9 @@ __all__ = [
     "Doctor",
     "run_doctor",
     "CheckResult",
+    "run_completion",
+    "get_completion_script",
+    "install_completion",
     "run_setup",
     "FileChange",
     "parse_ref_arguments",

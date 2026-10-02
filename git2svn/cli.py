@@ -310,6 +310,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # completion
+    parser_completion = subparsers.add_parser(
+        "completion",
+        help="Generate shell tab-completion scripts for bash, zsh, or fish",
+        description=(
+            "Generate shell tab-completion scripts for git2svn commands and options.\n"
+            "Supported shells: bash, zsh, fish.\n\n"
+            "Usage Examples:\n"
+            '  eval "$(git2svn completion bash)"         # Activate immediately in current bash session\n'
+            "  git2svn completion --install               # Automatically install to user completion directory\n"
+            "  git2svn completion zsh > ~/.zsh/_git2svn   # Save script to custom zsh completion folder"
+        ),
+    )
+    parser_completion.add_argument(
+        "shell",
+        nargs="?",
+        choices=["bash", "zsh", "fish"],
+        default=None,
+        help="Target shell (bash, zsh, fish; default: auto-detect from $SHELL)",
+    )
+    parser_completion.add_argument(
+        "--install",
+        action="store_true",
+        default=False,
+        help="Install completion script to standard user completions directory",
+    )
+
     return parser
 
 
@@ -338,6 +365,7 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         diff=False,
         stat=False,
         purge=False,
+        install=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -368,6 +396,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     root_logger.handlers = [handler]
+
+    if args.command == "completion":
+        from .completion import run_completion
+
+        return run_completion(shell=getattr(args, "shell", None), install=getattr(args, "install", False))
 
     if args.command == "doctor":
         from .doctor import run_doctor

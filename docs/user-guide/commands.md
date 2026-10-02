@@ -1,4 +1,4 @@
-# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `status`, `clean` & `doctor`
+# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `status`, `clean`, `doctor` & `completion`
 
 This document details the usage, flags, and mechanics for all `git2svn` commands.
 
@@ -339,7 +339,30 @@ git2svn doctor --git-dir /path/to/repo --svn-dir /path/to/svn
 
 ---
 
-## 9. Structural Staging Mechanics
+## 9. Command: `completion`
+
+Generates standalone shell tab-completion scripts for `bash`, `zsh`, or `fish`. Autocompletes subcommands, options, and dynamically suggests Git branches, tags, and SVN branch names.
+
+```bash
+# 1. Activate immediately in your current Bash session:
+eval "$(git2svn completion bash)"
+
+# 2. Or automatically install to standard user completion directory:
+git2svn completion --install
+
+# 3. Or generate script for custom shell configuration:
+git2svn completion zsh > ~/.zsh/completion/_git2svn
+git2svn completion fish > ~/.config/fish/completions/git2svn.fish
+```
+
+### Installation Targets (`--install`):
+- **Bash:** `~/.local/share/bash-completion/completions/git2svn`
+- **Zsh:** `~/.zsh/completion/_git2svn`
+- **Fish:** `~/.config/fish/completions/git2svn.fish`
+
+---
+
+## 10. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 
