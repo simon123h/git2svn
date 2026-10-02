@@ -142,8 +142,26 @@ class TestStatus(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_status.assert_called_once()
 
-    def test_status_range_not_configured_when_remote_branch_missing(self):
-        """Status prints Not configured when remote tracking branch is absent."""
+    def test_status_range_unresolved_when_remote_branch_missing(self):
+        """Status prints Unresolved and helpful hint when mirrorRemote is set but tracking branch is absent."""
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Unresolved" in line for line in printed_lines))
+            self.assertTrue(any("Run 'git fetch origin'" in line for line in printed_lines))
+
+    def test_status_range_not_configured_when_no_remote(self):
+        """Status prints Not configured when neither mirrorRemote nor remotes exist."""
+        # Unset mirrorRemote and remove origin remote
+        subprocess.run(["git", "config", "--unset", "git2svn.mirrorRemote"], cwd=self.git_path, check=False)
+        subprocess.run(["git", "remote", "remove", "origin"], cwd=self.git_path, check=False)
+
         with (
             patch.object(self.svn_workspace, "is_clean", return_value=True),
             patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "10"}),
@@ -308,6 +326,36 @@ class TestStatus(unittest.TestCase):
             self.assertTrue(
                 any("Range start ref 'nonexistent_start' not found in Git" in line for line in printed_lines)
             )
+
+    def test_resolve_sync_range_fallback_main(self):
+        """When SVN branch is trunk but Git remote tracking ref is origin/main, resolve_sync_range resolves origin/main..HEAD."""
+        f = self.git_path / "main_init.txt"
+        f.write_text("hello\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init main"], cwd=self.git_path, check=True)
+        head = self.git_repo.get_head_commit()
+
+        # Update origin/main instead of origin/trunk
+        subprocess.run(["git", "update-ref", "refs/remotes/origin/main", head], cwd=self.git_path, check=True)
+
+        with (
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
+        ):
+            resolved = git2svn.resolve_sync_range(self.git_repo, self.svn_workspace)
+            self.assertEqual(resolved, "origin/main..HEAD")
+
+    def test_status_unresolved_hint(self):
+        """When mirrorRemote is set but tracking branch is not found, status reports Unresolved with helpful hint."""
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "1"}),
+            patch.object(self.svn_workspace, "get_current_branch_name", return_value="trunk"),
+            patch("builtins.print") as mock_print,
+        ):
+            self.sync_mgr.status()
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Unresolved" in line for line in printed_lines))
+            self.assertTrue(any("Run 'git fetch origin'" in line for line in printed_lines))
 
 
 if __name__ == "__main__":

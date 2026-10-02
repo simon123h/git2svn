@@ -27,8 +27,12 @@ logger = logging.getLogger("git2svn")
 
 def resolve_sync_range(git_repo: GitRepo, svn_workspace: SvnWorkspace) -> Optional[str]:
     """
-    Dynamically resolve default sync range as '<mirror_remote>/<svn_branch>..HEAD'.
-    Returns None if mirror remote is missing or remote tracking ref does not exist.
+    Dynamically resolve default sync range as '<mirror_remote>/<branch>..HEAD'.
+    Intelligently resolves remote tracking branch:
+      1. <mirror_remote>/<svn_branch>
+      2. If svn_branch == 'trunk': tries <mirror_remote>/main, <mirror_remote>/master
+      3. <mirror_remote>/<current_git_branch>
+    Returns None if mirror remote is missing or no tracking ref resolves.
     """
     configured_remote = git_repo.get_config("git2svn.mirrorRemote")
     mirror_remote = configured_remote
@@ -38,9 +42,17 @@ def resolve_sync_range(git_repo: GitRepo, svn_workspace: SvnWorkspace) -> Option
 
     if mirror_remote:
         svn_branch = svn_workspace.get_current_branch_name()
-        remote_ref = f"{mirror_remote}/{svn_branch}"
-        if git_repo.ref_exists(remote_ref):
-            return f"{remote_ref}..HEAD"
+        current_git_branch = git_repo.get_current_branch()
+
+        candidates: List[str] = [f"{mirror_remote}/{svn_branch}"]
+        if svn_branch == "trunk":
+            candidates.extend([f"{mirror_remote}/main", f"{mirror_remote}/master"])
+        if current_git_branch and current_git_branch != "HEAD" and current_git_branch not in candidates:
+            candidates.append(f"{mirror_remote}/{current_git_branch}")
+
+        for remote_ref in candidates:
+            if git_repo.ref_exists(remote_ref):
+                return f"{remote_ref}..HEAD"
 
     return None
 

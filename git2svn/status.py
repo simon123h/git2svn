@@ -104,9 +104,31 @@ class StatusReporter:
         sync_range = resolve_sync_range(self.git, self.svn)
         print(f"\n{c.bold_cyan('[Synchronization]')}")
         if not sync_range:
-            print(
-                f"  Range     : {c.dim('Not configured')} (run 'git2svn setup' or set 'git config git2svn.mirrorRemote <remote>')"
+            configured_remote = self.git.get_config("git2svn.mirrorRemote")
+            remotes = self.git.get_remotes()
+            detected_remote = (
+                configured_remote
+                if configured_remote
+                else ("svn-mirror" if "svn-mirror" in remotes else ("origin" if "origin" in remotes else None))
             )
+            if not detected_remote:
+                print(
+                    f"  Range     : {c.dim('Not configured')} (set via 'git config git2svn.mirrorRemote <remote>' or run 'git2svn setup')"
+                )
+            else:
+                svn_branch = self.svn.get_current_branch_name()
+                current_git = self.git.get_current_branch()
+                cand = [f"{detected_remote}/{svn_branch}"]
+                if svn_branch == "trunk":
+                    cand.extend([f"{detected_remote}/main", f"{detected_remote}/master"])
+                if current_git and current_git != "HEAD" and f"{detected_remote}/{current_git}" not in cand:
+                    cand.append(f"{detected_remote}/{current_git}")
+                cand_str = ", ".join(f"'{ref}'" for ref in cand)
+                print(f"  Range     : {c.dim('Unresolved')} (tracking branch not found)")
+                print(
+                    f"  Hint      : Remote '{detected_remote}' configured, but no tracking branch ({cand_str}) found in Git."
+                )
+                print(f"              Run 'git fetch {detected_remote}' to download remote tracking branches.")
         else:
             print(f"  Range     : {c.bold(sync_range)}")
             try:
