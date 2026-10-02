@@ -154,23 +154,14 @@ Comprehensive documentation-as-code is maintained in the [`docs/`](docs/) folder
 
 ---
 
-## Development & Testing
-
-```bash
-# Run unit & integration tests
-python3 -m unittest discover tests
-
-# Lint and format with Ruff
-ruff check --fix .
-ruff format .
-
-# Enable pre-commit hook
-git config core.hooksPath .githooks
-# or use pre-commit framework: pre-commit install
-```
+## Contributing & Development
+ 
+Contributions, bug reports, and pull requests are welcome!
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for local environment setup, pre-commit hook configuration, Conventional Commits guidelines, and test instructions.
 
 ---
 
 ## License
 
 Distributed under the [Apache-2.0 License](LICENSE.md).
+
