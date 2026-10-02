@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -14,15 +15,15 @@ from .svn import (
 )
 
 
-def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
+def run_setup(
+    git_repo: GitRepo,
+    svn_target: Optional[Path | str] = None,
+    standalone: bool = False,
+) -> int:
     """Automate repository configuration, branch detection, and productivity aliases."""
-    if not git_repo.is_valid_repo():
-        print(f"Error: '{git_repo.repo_dir}' is not a valid Git repository.", file=sys.stderr)
-        return 1
-
     # 1. Resolve SVN target (URL, repo path, or existing working copy)
     raw_target: Optional[str] = str(svn_target).strip() if svn_target else None
-    if not raw_target:
+    if not raw_target and git_repo.is_valid_repo():
         # Check existing config or environment variable
         cfg_url = git_repo.get_config("git2svn.svnUrl")
         cfg_svn = git_repo.get_config("git2svn.svnDir")
@@ -30,7 +31,8 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
             raw_target = cfg_url
         elif cfg_svn:
             raw_target = cfg_svn
-        elif "SVN_URL" in os.environ:
+    if not raw_target:
+        if "SVN_URL" in os.environ:
             raw_target = os.environ["SVN_URL"].strip()
         elif "SVN_DIR" in os.environ:
             raw_target = os.environ["SVN_DIR"].strip()
@@ -52,6 +54,19 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # Initialize Git repository if not already valid
+    git_was_initialized = False
+    if not git_repo.is_valid_repo():
+        print(f"Initializing empty Git repository at: {git_repo.repo_dir}")
+        git_repo.repo_dir.mkdir(parents=True, exist_ok=True)
+        # Try initializing with -b main, fallback to git init
+        init_res = subprocess.run(
+            ["git", "init", "-b", "main"], cwd=git_repo.repo_dir, capture_output=True, check=False
+        )
+        if init_res.returncode != 0:
+            subprocess.run(["git", "init"], cwd=git_repo.repo_dir, capture_output=True, check=True)
+        git_was_initialized = True
 
     resolved_svn: Optional[Path] = None
     configured_url: Optional[str] = None
@@ -76,17 +91,58 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
             )
             return 1
 
-    # 2. Auto-detect local trunk branch
+    svn_rev: Optional[int] = None
+    if resolved_svn.is_dir():
+        try:
+            from .svn import SvnWorkspace
+
+            svn_ws = SvnWorkspace(resolved_svn)
+            svn_rev = svn_ws.get_revision()
+        except Exception:
+            svn_rev = None
+
     local_branches = git_repo.get_local_branches()
+    has_commits = bool(git_repo.get_commit_hash("HEAD"))
+    remotes = git_repo.get_remotes()
+
+    # Standalone mode: explicit flag, newly initialized git repo, already configured, or empty repo with SVN URL
+    is_standalone = (
+        standalone
+        or git_was_initialized
+        or (git_repo.get_config("git2svn.mode") == "standalone")
+        or (bool(configured_url) and not remotes and not has_commits)
+    )
+
+    # If standalone mode and repository has no commits, perform initial import
+    if is_standalone and not has_commits and resolved_svn.is_dir():
+        print(f"Importing SVN working copy (r{svn_rev or 'unknown'}) into Git...")
+        from .pull import commit_tree_from_directory
+
+        import_msg = f"Initial SVN import (r{svn_rev or 'HEAD'})"
+        root_commit = commit_tree_from_directory(
+            git_repo=git_repo,
+            source_dir=resolved_svn,
+            parent_commit=None,
+            commit_message=import_msg,
+        )
+        # Create svn-base branch and set default branch
+        git_repo.update_ref("refs/heads/svn-base", root_commit, msg="git2svn: initial import")
+        default_branch = "main"
+        git_repo.update_ref(f"refs/heads/{default_branch}", root_commit, msg="git2svn: initial import")
+        # Point HEAD to default_branch and checkout working directory
+        git_repo.run_cmd(["checkout", "-f", default_branch], check=True)
+        local_branches = [default_branch, "svn-base"]
+        has_commits = True
+
+    # 2. Auto-detect local trunk branch
     detected_trunk: Optional[str] = None
-    if "trunk" in local_branches:
-        detected_trunk = "trunk"
-    elif "main" in local_branches:
+    if "main" in local_branches:
         detected_trunk = "main"
+    elif "trunk" in local_branches:
+        detected_trunk = "trunk"
     elif "master" in local_branches:
         detected_trunk = "master"
     else:
-        # Use current branch if available
         current = git_repo.get_current_branch()
         if current and current in local_branches:
             detected_trunk = current
@@ -96,8 +152,7 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     # 3. Auto-detect remote tracking mirror branch
     remote_branches = git_repo.get_remote_branches()
     detected_mirror: Optional[str] = None
-    # Preferred mirror candidates, checking svn-mirror first, then origin
-    target_names = [detected_trunk] if detected_trunk else ["trunk", "main", "master"]
+    target_names = [detected_trunk] if detected_trunk else ["main", "trunk", "master"]
     preferred_remotes: List[str] = []
     for t_name in target_names:
         preferred_remotes.extend(
@@ -115,15 +170,55 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
             break
 
     if not detected_mirror and detected_trunk:
-        # Check for remote branch matching <remote>/<detected_trunk>
         candidates = [b for b in remote_branches if b.endswith(f"/{detected_trunk}")]
         if candidates:
-            # Prefer svn/mirror, fallback to origin, then first candidate
             svn_cand = [c for c in candidates if any(k in c.lower() for k in ("svn", "mirror", "origin"))]
             detected_mirror = svn_cand[0] if svn_cand else candidates[0]
 
-    # 4. Resolve mirror remote and configure Git settings
-    remotes = git_repo.get_remotes()
+    # 4. Resolve mode: Standalone mode vs Mirror mode
+    svn_dir_str = str(resolved_svn).replace("\\", "/")
+    git_repo.set_config("git2svn.svnDir", svn_dir_str)
+    if configured_url:
+        git_repo.set_config("git2svn.svnUrl", configured_url)
+    git_repo.set_config("pull.ff", "only")
+    if svn_rev is not None:
+        git_repo.set_config("git2svn.lastSvnRev", str(svn_rev))
+
+    trunk_name = detected_trunk or "main"
+    hook_installed = False
+
+    if is_standalone:
+        # Ensure svn-base branch exists
+        if not git_repo.ref_exists("refs/heads/svn-base"):
+            head_commit = git_repo.get_commit_hash("HEAD")
+            if head_commit:
+                git_repo.create_branch("svn-base", head_commit)
+        git_repo.set_config("git2svn.mode", "standalone")
+        git_repo.set_config("git2svn.baseBranch", "svn-base")
+
+        # Productivity aliases for standalone mode
+        push_script = "!git2svn replay"
+        pull_script = "!git2svn pull"
+        status_script = "!git2svn status"
+
+        git_repo.set_config("alias.svn-push", push_script)
+        git_repo.set_config("alias.svn-pull", pull_script)
+        git_repo.set_config("alias.svn-status", status_script)
+
+        print("\nSuccessfully configured git2svn (Standalone Mode):")
+        if configured_url:
+            print(f"  git2svn.svnUrl      = {configured_url}")
+        print(f"  git2svn.svnDir      = {svn_dir_str}")
+        print("  git2svn.mode        = standalone")
+        print("  git2svn.baseBranch  = svn-base")
+        print("  sync range          = dynamic (svn-base..HEAD)")
+        print("  pull.ff             = only")
+        print(f"  alias.svn-push      = {push_script}")
+        print(f"  alias.svn-pull      = {pull_script}")
+        print(f"  alias.svn-status    = {status_script}")
+        return 0
+
+    # Mirror mode configuration
     existing_mirror = git_repo.get_config("git2svn.mirrorRemote")
     if existing_mirror and (existing_mirror in remotes or not remotes):
         mirror_remote = existing_mirror
@@ -138,17 +233,10 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     else:
         mirror_remote = "svn-mirror"
 
-    # SVN directory path (use forward slashes for cross-platform consistency in git config)
-    svn_dir_str = str(resolved_svn).replace("\\", "/")
-    git_repo.set_config("git2svn.svnDir", svn_dir_str)
-    if configured_url:
-        git_repo.set_config("git2svn.svnUrl", configured_url)
     git_repo.set_config("git2svn.mirrorRemote", mirror_remote)
-    git_repo.set_config("pull.ff", "only")
+    git_repo.set_config("git2svn.mode", "mirror")
 
-    # 5. Configure productivity aliases
     mirror_branch = detected_mirror or f"{mirror_remote}/{detected_trunk or 'trunk'}"
-    trunk_name = detected_trunk or "trunk"
 
     push_script = (
         f"!f() {{ git2svn replay && git fetch {mirror_remote} && git checkout {trunk_name} && "
@@ -170,7 +258,7 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
 
     hook_installed = install_pre_push_hook(git_repo, mirror_remote)
 
-    print("Successfully configured git2svn:")
+    print("\nSuccessfully configured git2svn (Mirror Mode):")
     if configured_url:
         print(f"  git2svn.svnUrl      = {configured_url}")
     print(f"  git2svn.svnDir      = {svn_dir_str}")
@@ -192,6 +280,7 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
             "       git2svn setup\n"
             "     This enables automated 'git svn-pull' and 'git svn-push' fast-forward resets."
         )
+
     return 0
 
 

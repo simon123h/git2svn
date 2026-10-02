@@ -27,9 +27,18 @@ logger = logging.getLogger("git2svn")
 
 def resolve_sync_range(git_repo: GitRepo, svn_workspace: SvnWorkspace) -> Optional[str]:
     """
-    Dynamically resolve default sync range as '<mirror_remote>/<svn_branch>..HEAD'.
-    Returns None if mirror remote is missing or remote tracking ref does not exist.
+    Dynamically resolve default sync range:
+    1. If in standalone mode (git2svn.baseBranch or local 'svn-base' branch exists): '<baseBranch>..HEAD'
+    2. Otherwise in mirror mode: '<mirror_remote>/<svn_branch>..HEAD'
+    Returns None if neither can be resolved.
     """
+    base_branch = git_repo.get_config("git2svn.baseBranch")
+    if not base_branch and git_repo.ref_exists("refs/heads/svn-base"):
+        base_branch = "svn-base"
+
+    if base_branch and git_repo.ref_exists(f"refs/heads/{base_branch}"):
+        return f"{base_branch}..HEAD"
+
     configured_remote = git_repo.get_config("git2svn.mirrorRemote")
     mirror_remote = configured_remote
     if not mirror_remote:
@@ -371,7 +380,7 @@ class Synchronizer:
         else:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay completed successfully! All %d commits applied.", total)
-            self.svn.update()
+            self._on_replay_complete()
 
     def replay_abort(self) -> None:
         """Abort in-progress replay and revert uncommitted changes."""
@@ -413,6 +422,35 @@ class Synchronizer:
         else:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay finished (last commit was skipped).")
+            self._on_replay_complete()
+
+    def _on_replay_complete(self) -> None:
+        """Post-replay finalization: update SVN working copy and advance standalone base branch if configured."""
+        self.svn.update()
+        if self.dry_run:
+            return
+
+        base_branch = self.git.get_config("git2svn.baseBranch")
+        if not base_branch and self.git.ref_exists("refs/heads/svn-base"):
+            base_branch = "svn-base"
+
+        if base_branch and self.git.ref_exists(f"refs/heads/{base_branch}"):
+            head_hash = self.git.get_commit_hash("HEAD")
+            if head_hash:
+                try:
+                    self.git.update_ref(
+                        f"refs/heads/{base_branch}", head_hash, msg="git2svn: advance baseline after replay"
+                    )
+                    logger.info("Advanced standalone baseline branch '%s' to %s", base_branch, head_hash[:8])
+                except Exception as e:
+                    logger.debug("Failed to advance base branch '%s': %s", base_branch, e)
+
+        rev = self.svn.get_revision()
+        if rev is not None:
+            try:
+                self.git.set_config("git2svn.lastSvnRev", str(rev))
+            except Exception as e:
+                logger.debug("Failed to set git2svn.lastSvnRev: %s", e)
 
     def _show_commit_diff(self, commit_hash: str) -> None:
         """Display diff and commit details."""
@@ -631,7 +669,7 @@ class Synchronizer:
             total_commits,
             total_elapsed,
         )
-        self.svn.update()
+        self._on_replay_complete()
 
     def _patch_and_stage_commit(self, commit_hash: str) -> None:
         """Extract diff for a single commit, apply using git apply, and stage in SVN."""

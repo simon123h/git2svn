@@ -1,4 +1,4 @@
-# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `status`, `clean`, `doctor` & `completion`
+# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `pull`, `status`, `clean`, `doctor` & `completion`
 
 This document details the usage, flags, and mechanics for all `git2svn` commands.
 
@@ -267,39 +267,92 @@ flowchart TD
 Automates initial repository configuration for a fresh clone or existing repository. Accepts either a local working copy path or an SVN repository URL:
 
 ```bash
-# Option A: With an SVN repository URL (managed working copy in .git/git2svn/svn_wc/):
+# Option A: Standalone setup with an SVN repository URL (managed working copy in .git/git2svn/svn_wc/):
 git2svn setup https://svn.example.com/repo/trunk
 
-# Option B: With an existing local SVN working copy:
+# Option B: Explicit standalone setup on existing repository:
+git2svn setup --standalone /path/to/svn
+
+# Option C: Mirror mode setup with an existing local SVN working copy:
 git2svn setup /path/to/svn
 ```
 
+### Operating Modes:
+`git2svn` supports two distinct operating modes:
+- **Standalone Mode (`git2svn.mode = standalone`):** For teams or developers without an external `svn2git` mirror. Sync occurs directly between Git and Subversion using a baseline tracking branch (`svn-base`).
+- **Mirror Mode (`git2svn.mode = mirror`):** For environments maintaining a dedicated `svn2git` mirror remote (`origin` or `svn-mirror`).
+
 ### What `setup` does:
-1. **Dynamic Target Detection:**
-   - If an **SVN URL** (`https://`, `svn://`, `file://`, etc.) or repository store is given:
+1. **Dynamic Target Detection & Repository Initialization:**
+   - If invoked in a directory without a Git repository, automatically initializes `git init -b main`.
+   - If an **SVN URL** (`https://`, `svn://`, `file://`, etc.) is given:
      - Sets up a managed internal working copy in `.git/git2svn/svn_wc/`.
      - Automatically runs `svn checkout <url> .git/git2svn/svn_wc/`.
      - Sets `git config git2svn.svnUrl <url>` and `git config git2svn.svnDir <managed_dir>`.
-     - Future commands (`stage`, `replay`, `diff`, `status`) work seamlessly without needing `--svn-dir`!
+     - In Standalone Mode on a fresh repo, automatically imports the SVN working copy files into an initial Git commit on both `svn-base` and `main`!
+     - Future commands (`stage`, `replay`, `pull`, `diff`, `status`) work seamlessly without needing `--svn-dir`!
    - If a **local working copy path** is given:
      - Validates that the path contains a `.svn` directory.
      - Sets `git config git2svn.svnDir <path/to/svn>`.
 2. **Auto-Detects Local Trunk Branch:** Inspects local branches with preference for `trunk`, falling back to `main`, `master`, or the current branch.
 3. **Auto-Detects Remote Mirror Tracking Branch:** Scans remote branches for `svn-mirror/trunk`, `origin/trunk`, or branches matching the detected trunk name.
-4. **Writes Git Configuration:**
-   - `git config git2svn.svnDir <path/to/svn>`
-   - `git config git2svn.svnUrl <url>` (if URL provided)
-   - `git config git2svn.mirrorRemote <mirror_remote>` (e.g. `svn-mirror` or `origin`)
-   - `git config pull.ff only` (prevents accidental merge commits when pulling)
-5. **Configures Safe Productivity Aliases:**
-   - `git config alias.svn-push`: Replays trunk to SVN, fetches SVN mirror, and safely resets trunk *only* if `trunk` matches `svn-mirror/trunk` (guarded by `git diff --quiet`).
-   - `git config alias.svn-pull`: Fetches SVN mirror, fast-forwards trunk if clean, and automatically rebases local commits if unpushed work exists on trunk.
-   - `git config alias.svn-status`: Inspects synchronization health, pending commits, and workspace state via `git2svn status`.
-6. **Installs Pre-Push Hook Guard:** Automatically installs `.git/hooks/pre-push` to block all direct `git push` commands targeting the SVN mirror remote (`origin` or `svn-mirror`), preventing history divergence with `svn2git` while allowing pushes to other collaboration remotes (forks/PRs).
+4. **Configures Mode & Settings:**
+   - **In Standalone Mode:**
+     - `git config git2svn.mode standalone`
+     - `git config git2svn.baseBranch svn-base`
+     - `git config pull.ff only`
+     - `git config alias.svn-push "!git2svn replay"`
+     - `git config alias.svn-pull "!git2svn pull"`
+     - `git config alias.svn-status "!git2svn status"`
+   - **In Mirror Mode:**
+     - `git config git2svn.mode mirror`
+     - `git config git2svn.mirrorRemote <mirror_remote>` (e.g. `svn-mirror` or `origin`)
+     - `git config pull.ff only`
+     - `git config alias.svn-push`: Replays trunk to SVN, fetches SVN mirror, and safely resets trunk *only* if `trunk` matches `svn-mirror/trunk` (guarded by `git diff --quiet`).
+     - `git config alias.svn-pull`: Fetches SVN mirror, fast-forwards trunk if clean, and automatically rebases local commits if unpushed work exists on trunk.
+     - `git config alias.svn-status`: Inspects synchronization health via `git2svn status`.
+     - Installs pre-push hook guard in `.git/hooks/pre-push` to block accidental direct pushes to the mirror remote.
 
 ---
 
-## 6. Command: `status`
+## 6. Command: `pull`
+
+*(Standalone Mode only)* Fetches remote SVN revisions and ingests them into the Git baseline branch (`svn-base`), then automatically rebases your active branch onto `svn-base`.
+
+```bash
+# Pull remote SVN revisions and rebase the current branch onto svn-base:
+git2svn pull
+
+# Fetch and ingest into svn-base without rebasing the active branch:
+git2svn pull --no-rebase
+
+# Preview SVN revisions without modifying Git or SVN:
+git2svn pull --dry-run
+```
+
+### What `pull` does:
+1. **Updates SVN Working Copy:** Invokes `svn update` inside the SVN workspace to fetch the latest remote revisions from Subversion.
+2. **Detects Revision Changes:** Compares the updated SVN revision against `git2svn.lastSvnRev`. If already up to date, it reports that no changes were found and exits immediately.
+3. **Synthesizes Isolated Git Commit:**
+   - Uses an isolated temporary Git index file (`GIT_INDEX_FILE` and `GIT_WORK_TREE`) pointing directly to the SVN workspace (ignoring `.svn`).
+   - Extracts SVN commit messages, authors, and revision numbers via `svn log` across the received revision range.
+   - Generates a new Git commit pointing to the current `svn-base` parent commit.
+   - Advances `refs/heads/svn-base` to this new commit and records `git2svn.lastSvnRev`.
+   - **Crucially, neither your active Git index nor your active working tree are modified during commit synthesis.**
+4. **Rebases Active Branch:** Automatically executes `git rebase svn-base` on your current working branch so that your local, un-replayed Git commits remain cleanly stacked on top of remote changes.
+5. **Conflict Handling:** If the automatic rebase encounters a conflict between your local Git commits and incoming SVN changes, execution pauses with actionable instructions:
+   ```text
+   [Rebase Conflict]
+   Automatic rebase stopped due to conflicts.
+   Resolve the conflicts using standard Git commands, then run:
+       git rebase --continue
+   (or 'git rebase --abort' to cancel the rebase).
+   ```
+
+---
+
+## 7. Command: `status`
+
 
 Inspects synchronization health, pending commits in the active synchronization range (`<mirrorRemote>/<svn-branch>..HEAD`), and working tree states across both Git and Subversion.
 
@@ -319,7 +372,7 @@ git2svn status
 
 ---
 
-## 7. Command: `clean`
+## 8. Command: `clean`
 
 Resets the SVN workspace to a clean, unlocked state by reverting uncommitted changes, removing untracked conflict artifacts (`.rej` / `.orig`), deleting unversioned files/directories, and releasing SVN locks.
 
@@ -341,7 +394,7 @@ git2svn clean --purge
 
 ---
 
-## 8. Command: `doctor`
+## 9. Command: `doctor`
 
 Runs pre-flight diagnostics to inspect your environment, verify tool prerequisites (Git and Subversion CLI binaries), check repository and mirror tracking configurations, inspect pre-push hooks, and validate SVN working copy health.
 
@@ -399,7 +452,7 @@ Passing `--fix` attempts safe, automated repair of common workspace and configur
 
 ---
 
-## 9. Command: `completion`
+## 10. Command: `completion`
 
 Generates standalone shell tab-completion scripts for `bash`, `zsh`, or `fish`. Autocompletes subcommands, options, and dynamically suggests Git branches, tags, and SVN branch names.
 
@@ -422,7 +475,7 @@ git2svn completion fish > ~/.config/fish/completions/git2svn.fish
 
 ---
 
-## 10. Structural Staging Mechanics
+## 11. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 

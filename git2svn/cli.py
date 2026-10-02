@@ -262,6 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SVN_TARGET",
         help="Path to SVN working copy or SVN repository URL (optional if already configured or set via --svn-dir/--svn-url)",
     )
+    parser_setup.add_argument(
+        "--standalone",
+        action="store_true",
+        default=False,
+        help="Explicitly configure git2svn in standalone mode (no svn2git mirror required)",
+    )
 
     # diff
     parser_diff = subparsers.add_parser(
@@ -275,6 +281,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Display a diffstat summary of changed files instead of the full patch",
+    )
+
+    # pull
+    parser_pull = subparsers.add_parser(
+        "pull",
+        parents=[common_parser],
+        help="Pull remote SVN revisions and ingest them into standalone base branch (svn-base)",
+        description=(
+            "Pull remote SVN revisions into the standalone tracking branch (svn-base).\n"
+            "Runs 'svn update', captures newly arrived SVN revisions into an isolated commit on 'svn-base',\n"
+            "and automatically rebases your active branch onto 'svn-base'."
+        ),
+    )
+    parser_pull.add_argument(
+        "--no-rebase",
+        dest="rebase",
+        action="store_false",
+        default=True,
+        help="Do not automatically rebase the active Git branch onto svn-base after pulling",
     )
 
     # status
@@ -354,11 +379,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def handle_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str]) -> int:
+def handle_setup(git_repo: GitRepo, svn_dir_path: Optional[Path | str], standalone: bool = False) -> int:
     """Automate repository configuration, branch detection, and productivity aliases."""
     from .setup import run_setup
 
-    return run_setup(git_repo, svn_dir_path)
+    return run_setup(git_repo, svn_dir_path, standalone=standalone)
 
 
 def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -382,6 +407,8 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         fix=False,
         install=False,
         interactive=False,
+        rebase=True,
+        standalone=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -429,15 +456,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             fix=getattr(args, "fix", False),
         )
 
-    if not git_repo.is_valid_repo():
-        print(f"Error: '{git_dir}' is not a valid Git repository.", file=sys.stderr)
-        return 1
-
     if args.command == "setup":
         svn_arg = (
             getattr(args, "setup_target", None) or getattr(args, "svn_url", None) or getattr(args, "svn_dir", None)
         )
-        return handle_setup(git_repo, svn_arg)
+        return handle_setup(git_repo, svn_arg, standalone=getattr(args, "standalone", False))
+
+    if not git_repo.is_valid_repo():
+        print(f"Error: '{git_dir}' is not a valid Git repository.", file=sys.stderr)
+        return 1
 
     # 1. SVN workspace directory resolution: CLI arg -> $SVN_DIR -> git config -> replay cwd
     svn_dir = args.svn_dir or (Path(os.environ["SVN_DIR"]) if "SVN_DIR" in os.environ else None)
@@ -576,6 +603,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif args.command == "switch":
             sync_mgr.switch(args.branch)
             return 0
+        elif args.command == "pull":
+            from .pull import run_pull
+
+            return run_pull(
+                git_repo,
+                svn_workspace,
+                rebase=getattr(args, "rebase", True),
+                dry_run=dry_run,
+                color_mode=color_mode,
+            )
         elif args.command == "status":
             return sync_mgr.status()
         elif args.command == "clean":

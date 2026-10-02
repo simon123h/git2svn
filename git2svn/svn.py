@@ -436,6 +436,57 @@ class SvnWorkspace:
         if res.stdout:
             logger.info("SVN update output:\n%s", res.stdout.strip())
 
+    def get_revision(self) -> Optional[int]:
+        """Return the current working revision of the working copy as an integer."""
+        info = self.get_info()
+        rev_str = info.get("Revision")
+        if rev_str and rev_str.isdigit():
+            return int(rev_str)
+        return None
+
+    def get_log_entries(
+        self, revision_range: Optional[str] = None, limit: Optional[int] = None
+    ) -> List[Dict[str, str]]:
+        """
+        Fetch commit log entries from the SVN repository using svn log --xml.
+        Returns a list of dicts with keys: revision, author, date, message.
+        """
+        if self.dry_run:
+            return []
+
+        args = ["log", "--xml"]
+        if revision_range:
+            args.extend(["-r", revision_range])
+        if limit is not None:
+            args.extend(["-l", str(limit)])
+
+        res = self.run_cmd(args, check=False)
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+
+        entries: List[Dict[str, str]] = []
+        try:
+            root = ET.fromstring(res.stdout)
+            for entry in root.findall("logentry"):
+                rev = entry.get("revision", "")
+                author_elem = entry.find("author")
+                author = author_elem.text.strip() if author_elem is not None and author_elem.text else ""
+                date_elem = entry.find("date")
+                date = date_elem.text.strip() if date_elem is not None and date_elem.text else ""
+                msg_elem = entry.find("msg")
+                msg = msg_elem.text.replace("\r\n", "\n").strip() if msg_elem is not None and msg_elem.text else ""
+                entries.append(
+                    {
+                        "revision": rev,
+                        "author": author,
+                        "date": date,
+                        "message": msg,
+                    }
+                )
+        except Exception as e:
+            logger.debug("Failed to parse svn log --xml output: %s", e)
+        return entries
+
     def get_recent_log_messages(self, limit: int = 25) -> List[str]:
         """
         Fetch the most recent commit log messages from the SVN repository using svn log --xml.

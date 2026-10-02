@@ -286,6 +286,40 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Selective Cherry-Picking:** Developers can skip unneeded commits on the fly with `s` without rewriting Git history.
   - **Consistent CLI & Autocompletion:** Supported across `bash`, `zsh`, and `fish` tab-completions.
 
+---
+
+### ADR-23: Standalone Mode (Direct SVN Sync without svn2git Mirror) & `git2svn pull`
+* **Context:** `git2svn` originally assumed the presence of an existing bi-directional or read-only `svn2git` Git mirror remote (`origin` or `svn-mirror`). While this architecture enables fast-forward synchronization in organizations that maintain such an infrastructure, many developers mandated to use Subversion do not have an automated `svn2git` mirror. They need a lightweight, turnkey way to initialize a local Git repository from Subversion, develop using Git, replay commits to Subversion, and pull remote Subversion revisions back into Git without external mirror tooling or third-party dependencies.
+* **Decision:**
+  1. **Dual Operating Modes:**
+     - **Mirror Mode (`git2svn.mode = mirror`):** Existing workflow utilizing remote tracking branches (e.g. `origin/trunk..HEAD`) and mirror fast-forwards.
+     - **Standalone Mode (`git2svn.mode = standalone`):** Pure direct sync between Git and Subversion using a dedicated baseline branch (`svn-base`) and internal managed working copy (`.git/git2svn/svn_wc`).
+  2. **Automated Standalone Setup (`git2svn setup <url>`):**
+     - If invoked in a directory without an existing Git repository, automatically initializes `git init -b main`.
+     - Automatically checks out the SVN URL into the managed working copy `.git/git2svn/svn_wc`.
+     - Synthesizes an initial Git commit representing the SVN repository tree (ignoring `.svn`) and points both `svn-base` and `main` to this root commit.
+     - Sets `git2svn.mode = standalone`, `git2svn.baseBranch = svn-base`, and records `git2svn.lastSvnRev`.
+     - Configures standalone productivity aliases:
+       - `git svn-push` -> `!git2svn replay`
+       - `git svn-pull` -> `!git2svn pull`
+       - `git svn-status` -> `!git2svn status`
+  3. **Baseline Auto-Advancement on Replay:**
+     - In standalone mode, `git2svn replay` automatically advances `svn-base` to `HEAD` upon successful replay completion and updates `git2svn.lastSvnRev` to match the newly committed SVN revision.
+     - This ensures dynamic range resolution (`svn-base..HEAD`) automatically clears pending commits after replay.
+  4. **Pulling Remote SVN Changes (`git2svn pull`):**
+     - Runs `svn update` in the SVN workspace.
+     - Checks whether remote revisions arrived (`new_rev > lastSvnRev`).
+     - Uses an **isolated temporary Git index** (`GIT_INDEX_FILE` and `GIT_WORK_TREE`) to stage the updated SVN tree (excluding `.svn`), synthesize a Git tree, and create a commit on `svn-base` with commit messages extracted from `svn log`. This touches neither the active Git working tree nor the active Git index.
+     - Updates `git2svn.lastSvnRev`.
+     - Automatically rebases the current Git branch onto `svn-base` (can be suppressed with `--no-rebase`).
+     - Detects rebase conflicts gracefully and outputs actionable `git rebase --continue` / `git rebase --abort` instructions.
+* **Consequences:**
+  - **Zero Barrier to Entry:** Developers can start using Git with SVN in seconds with `git2svn setup <svn-url>` without configuring mirror servers or daemon scripts.
+  - **Clean Working Tree Safety:** SVN tree commits are synthesized via Git plumbing and isolated index files without disturbing dirty or uncommitted files in the user's active Git working directory.
+  - **Zero External Dependencies:** Built strictly using Python standard library and standard Git/SVN CLI binaries.
+  - **Full Backward Compatibility:** Repositories with existing `svn2git` mirror tracking continue operating in Mirror Mode with no changes.
+
+
 
 
 

@@ -179,6 +179,16 @@ class GitRepo:
         except Exception:
             return False
 
+    def get_git_dir(self) -> Path:
+        """Return the resolved path to the .git directory."""
+        res = self.run_cmd(["rev-parse", "--git-dir"], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            p = Path(res.stdout.strip())
+            if not p.is_absolute():
+                p = (self.repo_dir / p).resolve()
+            return p
+        return (self.repo_dir / ".git").resolve()
+
     def get_current_branch(self) -> str:
         """Return the current branch name or 'HEAD (detached)'."""
         res = self.run_cmd(["rev-parse", "--abbrev-ref", "HEAD"], check=False)
@@ -314,3 +324,26 @@ class GitRepo:
                 line.strip() for line in res.stdout.splitlines() if line.strip() and not line.strip().endswith("/HEAD")
             ]
         return []
+
+    def get_commit_hash(self, ref: str = "HEAD") -> Optional[str]:
+        """Return full 40-character commit hash of a ref, or None if ref does not exist."""
+        res = self.run_cmd(["rev-parse", "--verify", "--quiet", ref], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+        return None
+
+    def update_ref(self, ref: str, commit_hash: str, msg: Optional[str] = None) -> None:
+        """Update a reference (e.g. 'refs/heads/svn-base') to point to commit_hash."""
+        cmd = ["update-ref"]
+        if msg:
+            cmd.extend(["-m", msg])
+        cmd.extend([ref, commit_hash])
+        self.run_cmd(cmd, check=True)
+
+    def create_branch(self, branch_name: str, start_point: str = "HEAD", force: bool = False) -> None:
+        """Create or reset a local branch pointing to start_point."""
+        cmd = ["branch"]
+        if force:
+            cmd.append("-f")
+        cmd.extend([branch_name, start_point])
+        self.run_cmd(cmd, check=True)

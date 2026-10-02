@@ -13,6 +13,7 @@ from .doctor import CheckResult, Doctor, FixResult, run_doctor
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
 from .patcher import Patcher
+from .pull import run_pull
 from .setup import run_setup
 from .snapshot import SnapshotSynchronizer
 from .state import (
@@ -62,6 +63,7 @@ __all__ = [
     "get_completion_script",
     "install_completion",
     "run_setup",
+    "run_pull",
     "FileChange",
     "parse_ref_arguments",
     "parse_name_status",

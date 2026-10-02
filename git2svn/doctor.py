@@ -404,6 +404,16 @@ class Doctor:
                 message="Skipped (not a Git repository)",
             )
 
+        mode = self.git.get_config("git2svn.mode")
+        base_branch = self.git.get_config("git2svn.baseBranch") or "svn-base"
+        if mode == "standalone" or (not self.git.get_remotes() and self.git.ref_exists(f"refs/heads/{base_branch}")):
+            return CheckResult(
+                category="Repository Configuration & Safety",
+                name="Synchronization Mode",
+                status="OK",
+                message=f"Standalone Mode (base branch: '{base_branch}')",
+            )
+
         mirror = self.git.get_config("git2svn.mirrorRemote")
         if not mirror:
             return CheckResult(
@@ -504,6 +514,16 @@ class Doctor:
                 name="Pre-push Hook Guard",
                 status="WARN",
                 message="Skipped (not a Git repository)",
+            )
+
+        mode = self.git.get_config("git2svn.mode")
+        remotes = self.git.get_remotes()
+        if mode == "standalone" or (not remotes and not self.git.get_config("git2svn.mirrorRemote")):
+            return CheckResult(
+                category="Repository Configuration & Safety",
+                name="Pre-push Hook Guard",
+                status="OK",
+                message="Not required (standalone mode has no mirror remote)",
             )
 
         hook_file = self.git.repo_dir / ".git" / "hooks" / "pre-push"

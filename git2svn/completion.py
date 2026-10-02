@@ -30,7 +30,7 @@ _git2svn_completions() {
         cword=$COMP_CWORD
     }
 
-    local commands="stage diff replay switch setup status clean doctor completion"
+    local commands="stage diff replay switch setup pull status clean doctor completion"
     local common_opts="--git-dir -g --svn-dir -s --svn-url --dry-run -n --verbose -v --color -V --version -h --help"
 
     # Find the active subcommand (if any)
@@ -38,7 +38,7 @@ _git2svn_completions() {
     local i=1
     while [ $i -lt $cword ]; do
         case "${words[i]}" in
-            stage|diff|replay|switch|setup|status|clean|doctor|completion)
+            stage|diff|replay|switch|setup|pull|status|clean|doctor|completion)
                 cmd="${words[i]}"
                 break
                 ;;
@@ -159,6 +159,7 @@ _git2svn() {
         'replay:Sequentially port Git commits into SVN history'
         'switch:Switch SVN working copy to a different branch'
         'setup:Automate initial repository configuration and aliases'
+        'pull:Pull remote SVN revisions into standalone base branch'
         'status:Inspect synchronization health and pending commits'
         'clean:Revert uncommitted changes and clear SVN locks'
         'doctor:Run pre-flight diagnostics on Git, SVN, hooks, and configuration'
@@ -212,6 +213,11 @@ _git2svn() {
                     _arguments \
                         $common_opts \
                         '1:SVN target:_files'
+                    ;;
+                pull)
+                    _arguments \
+                        $common_opts \
+                        '--no-rebase[Do not automatically rebase active branch]'
                     ;;
                 clean)
                     _arguments \
@@ -307,6 +313,7 @@ complete -c git2svn -n __fish_git2svn_needs_command -a diff -d "Inspect uncommit
 complete -c git2svn -n __fish_git2svn_needs_command -a replay -d "Sequentially port Git commits into SVN history"
 complete -c git2svn -n __fish_git2svn_needs_command -a switch -d "Switch SVN working copy to a different branch"
 complete -c git2svn -n __fish_git2svn_needs_command -a setup -d "Automate initial repository configuration and aliases"
+complete -c git2svn -n __fish_git2svn_needs_command -a pull -d "Pull remote SVN revisions into standalone base branch"
 complete -c git2svn -n __fish_git2svn_needs_command -a status -d "Inspect synchronization health and pending commits"
 complete -c git2svn -n __fish_git2svn_needs_command -a clean -d "Revert uncommitted changes and clear SVN locks"
 complete -c git2svn -n __fish_git2svn_needs_command -a doctor -d "Run pre-flight diagnostics on Git, SVN, hooks, and configuration"
@@ -336,6 +343,9 @@ complete -c git2svn -n "__fish_git2svn_using_command switch" -a "(__fish_git2svn
 
 # setup
 complete -c git2svn -n "__fish_git2svn_using_command setup" -r -d "SVN target"
+
+# pull
+complete -c git2svn -n "__fish_git2svn_using_command pull" -l no-rebase -d "Do not automatically rebase active branch"
 
 # clean
 complete -c git2svn -n "__fish_git2svn_using_command clean" -l purge -d "Completely delete local managed SVN working copy"
