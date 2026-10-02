@@ -7,9 +7,35 @@ flowchart TD
     Feature["feature/* (working branches)"] -->|1. git rebase & merge --ff-only| Trunk["local 'trunk' (staging branch)"]
     Trunk -->|2. git2svn replay -u| SVN["Local SVN Workspace"]
     SVN -->|"3. svn commit (automatic in replay)"| Upstream["Remote SVN Repository"]
-    Upstream -->|"4. incremental mirror (svn2git)"| Mirror["svn-mirror/trunk (tracking branch)"]
+    Upstream -->|"4. incremental mirror (svn2git / git-svn)"| Mirror["svn-mirror/trunk (tracking branch)"]
     Mirror -->|5. git checkout trunk && git reset --hard| Trunk
 ```
+
+---
+
+## 0. Bootstrapping Your Mirror: Two Approaches
+
+Depending on your organization's infrastructure, you can set up your mirror in one of two ways:
+
+### Approach A: Server-Side Mirror (DevOps / SubGit / all-fast-export)
+If your team already maintains a centralized GitLab/GitHub mirror that automatically syncs from Subversion, simply clone the Git repository and run `git2svn setup`:
+```bash
+git clone git@github.com:my-org/my-project.git
+cd my-project
+git2svn setup https://svn.example.com/repo/my-project/trunk
+```
+
+### Approach B: Local Mirror via `git2svn init-mirror` (No DevOps Server Required)
+If you do not have a server-side mirror daemon, you can bootstrap a turnkey local mirror directly from Subversion using official `git-svn`:
+```bash
+git2svn init-mirror https://svn.example.com/repo/my-project my-project --stdlayout
+cd my-project
+```
+This single command:
+1. Runs `git svn init` and `git svn fetch` to establish a local tracking mirror at `refs/remotes/svn-mirror/trunk`.
+2. Checks out local `trunk`.
+3. Sets up the managed local SVN working copy (`.git/git2svn/svn_wc`).
+4. Configures `git svn-pull` and `git svn-push` aliases directly hooked into `git svn fetch`.
 
 ---
 

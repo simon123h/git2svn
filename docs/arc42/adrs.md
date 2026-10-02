@@ -286,6 +286,57 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Selective Cherry-Picking:** Developers can skip unneeded commits on the fly with `s` without rewriting Git history.
   - **Consistent CLI & Autocompletion:** Supported across `bash`, `zsh`, and `fish` tab-completions.
 
+---
+
+### ADR-23: Local Git-SVN Mirror Bootstrapping (`git2svn init-mirror`)
+* **Context:** In enterprise environments where Subversion is the central source of truth, teams often do not have a dedicated server-side DevOps `svn2git` unidirectional sync daemon (such as SubGit or a cron job) mirroring commits to a shared GitLab or GitHub repository. Without an automated mirror, new developers faced a high barrier to entry: they needed to manually configure `git-svn`, handle refspec mappings, initialize empty Git repos, check out tracking branches, and run `git2svn setup`.
+* **Decision:**
+  1. Introduce the `git2svn init-mirror <svn-url> [target-dir]` command to bootstrap a local Subversion mirror in a single step using the official `git-svn` CLI utility.
+  2. Implement prerequisite validation via `is_git_svn_available()`, providing actionable package installation commands (Debian/Ubuntu, Fedora/RHEL, macOS, Arch) if `git-svn` is missing.
+  3. Support standard and customized Subversion repository layouts via `--stdlayout`, `-T/--trunk`, `-b/--branches`, `-t/--tags`, `--prefix`, and `--revision` (`-r`).
+  4. Automatically run `git svn fetch`, branch checkout (`trunk`), and invoke `git2svn setup` to configure the managed SVN working copy (`.git/git2svn/svn_wc`).
+  5. Configure productivity Git aliases tailored specifically for local `git-svn` tracking:
+     - `git svn-pull`: Fetches latest Subversion revisions via `git svn fetch` and fast-forwards/rebases the local tracking branch.
+     - `git svn-push`: Replays Git feature commits to SVN via `git2svn replay`, updates the local mirror tracking branch via `git svn fetch`, and resets the local branch to match the mirror.
+* **Architecture Diagram:**
+
+```mermaid
+flowchart TD
+    subgraph Upstream ["Upstream Central Subversion"]
+        SVN_REPO["Subversion Server (SVN URL)"]
+    end
+
+    subgraph Local_Workstation ["Local Developer Workstation"]
+        subgraph Mirror ["git-svn Bridge"]
+            SVN_FETCH["git svn fetch"]
+            REF["refs/remotes/svn-mirror/trunk"]
+        end
+
+        subgraph Git_Repo ["Local Git Repository"]
+            TRUNK["Branch: trunk"]
+            FEAT["Branch: feature/my-work"]
+        end
+
+        subgraph Managed_WC ["Managed SVN Working Copy (.git/git2svn/svn_wc)"]
+            WC["SVN Working Copy"]
+        end
+    end
+
+    SVN_REPO -->|git svn fetch| SVN_FETCH
+    SVN_FETCH --> REF
+    REF -->|git svn-pull ff/rebase| TRUNK
+    TRUNK -->|git checkout -b| FEAT
+    FEAT -->|git svn-push / git2svn replay| WC
+    WC -->|svn commit| SVN_REPO
+```
+
+* **Consequences:**
+  - **Zero Server-Side DevOps Prerequisites:** Any developer or team can immediately adopt the full Git feature branch workflow against a standard SVN repository without needing administrator access or server-side sync daemons.
+  - **Battle-Tested Bi-Directional Bridge:** Delegates complex Subversion history ingestion, tags/branches layout mapping, and `svn:ignore` translation to the mature, official `git-svn` tool.
+  - **Turnkey Onboarding:** Replaces a multi-step manual setup with a single self-contained command (`git2svn init-mirror https://svn.example.com/repo`).
+  - **Seamless Workflow Integration:** Productivity aliases (`git svn-pull` and `git svn-push`) abstract away the dual-system synchronizations.
+
+
 
 
 

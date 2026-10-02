@@ -30,7 +30,7 @@ _git2svn_completions() {
         cword=$COMP_CWORD
     }
 
-    local commands="stage diff replay switch setup status clean doctor completion"
+    local commands="stage diff replay switch setup init-mirror status clean doctor completion"
     local common_opts="--git-dir -g --svn-dir -s --svn-url --dry-run -n --verbose -v --color -V --version -h --help"
 
     # Find the active subcommand (if any)
@@ -38,7 +38,7 @@ _git2svn_completions() {
     local i=1
     while [ $i -lt $cword ]; do
         case "${words[i]}" in
-            stage|diff|replay|switch|setup|status|clean|doctor|completion)
+            stage|diff|replay|switch|setup|init-mirror|status|clean|doctor|completion)
                 cmd="${words[i]}"
                 break
                 ;;
@@ -86,6 +86,9 @@ _git2svn_completions() {
                 ;;
             replay)
                 COMPREPLY=( $(compgen -W "$common_opts --copy --continue --abort --skip --force -y --yes -i --interactive" -- "$cur") )
+                ;;
+            init-mirror)
+                COMPREPLY=( $(compgen -W "$common_opts --stdlayout -T --trunk -b --branches -t --tags --prefix -r --revision --no-fetch" -- "$cur") )
                 ;;
             clean)
                 COMPREPLY=( $(compgen -W "$common_opts --purge" -- "$cur") )
@@ -161,6 +164,7 @@ _git2svn() {
         'setup:Automate initial repository configuration and aliases'
         'status:Inspect synchronization health and pending commits'
         'clean:Revert uncommitted changes and clear SVN locks'
+        'init-mirror:Bootstrap a local Subversion mirror repository using git-svn'
         'doctor:Run pre-flight diagnostics on Git, SVN, hooks, and configuration'
         'completion:Generate shell tab-completion scripts'
     )
@@ -212,6 +216,19 @@ _git2svn() {
                     _arguments \
                         $common_opts \
                         '1:SVN target:_files'
+                    ;;
+                init-mirror)
+                    _arguments \
+                        $common_opts \
+                        '--stdlayout[Use standard Subversion layout]' \
+                        '(-T --trunk)'{-T,--trunk}'[Subpath to trunk]:path:' \
+                        '(-b --branches)'{-b,--branches}'[Subpath to branches]:path:' \
+                        '(-t --tags)'{-t,--tags}'[Subpath to tags]:path:' \
+                        '--prefix[Remote tracking ref prefix]:prefix:' \
+                        '(-r --revision)'{-r,--revision}'[Initial Subversion revision to import]:revision:' \
+                        '--no-fetch[Initialize git-svn config without performing initial fetch]' \
+                        '1:SVN repository URL:_urls' \
+                        '2:Target directory:_files -/'
                     ;;
                 clean)
                     _arguments \
@@ -309,6 +326,7 @@ complete -c git2svn -n __fish_git2svn_needs_command -a switch -d "Switch SVN wor
 complete -c git2svn -n __fish_git2svn_needs_command -a setup -d "Automate initial repository configuration and aliases"
 complete -c git2svn -n __fish_git2svn_needs_command -a status -d "Inspect synchronization health and pending commits"
 complete -c git2svn -n __fish_git2svn_needs_command -a clean -d "Revert uncommitted changes and clear SVN locks"
+complete -c git2svn -n __fish_git2svn_needs_command -a init-mirror -d "Bootstrap a local Subversion mirror repository using git-svn"
 complete -c git2svn -n __fish_git2svn_needs_command -a doctor -d "Run pre-flight diagnostics on Git, SVN, hooks, and configuration"
 complete -c git2svn -n __fish_git2svn_needs_command -a completion -d "Generate shell tab-completion scripts"
 
@@ -336,6 +354,15 @@ complete -c git2svn -n "__fish_git2svn_using_command switch" -a "(__fish_git2svn
 
 # setup
 complete -c git2svn -n "__fish_git2svn_using_command setup" -r -d "SVN target"
+
+# init-mirror
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -l stdlayout -d "Use standard Subversion layout"
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -s T -l trunk -r -d "Subpath to trunk"
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -s b -l branches -r -d "Subpath to branches"
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -s t -l tags -r -d "Subpath to tags"
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -l prefix -r -d "Remote tracking ref prefix"
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -s r -l revision -r -d "Initial Subversion revision to import"
+complete -c git2svn -n "__fish_git2svn_using_command init-mirror" -l no-fetch -d "Initialize git-svn config without performing initial fetch"
 
 # clean
 complete -c git2svn -n "__fish_git2svn_using_command clean" -l purge -d "Completely delete local managed SVN working copy"

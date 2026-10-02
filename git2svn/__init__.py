@@ -12,6 +12,7 @@ from .core import Synchronizer
 from .doctor import CheckResult, Doctor, FixResult, run_doctor
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
+from .mirror import get_git_svn_version, is_git_svn_available, run_init_mirror
 from .patcher import Patcher
 from .setup import run_setup
 from .snapshot import SnapshotSynchronizer
@@ -62,6 +63,9 @@ __all__ = [
     "get_completion_script",
     "install_completion",
     "run_setup",
+    "run_init_mirror",
+    "is_git_svn_available",
+    "get_git_svn_version",
     "FileChange",
     "parse_ref_arguments",
     "parse_name_status",

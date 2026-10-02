@@ -399,7 +399,48 @@ Passing `--fix` attempts safe, automated repair of common workspace and configur
 
 ---
 
-## 9. Command: `completion`
+## 9. Command: `init-mirror`
+
+Bootstraps a local Subversion mirror Git repository using the official `git-svn` tool and automatically configures `git2svn` in a single command.
+
+This is especially valuable when your organization does not run a server-side `svn2git` mirror daemon (like SubGit or a DevOps cron job):
+
+```bash
+# Basic setup with standard Subversion repository layout (trunk, branches, tags):
+git2svn init-mirror https://svn.example.com/repo/myproject my-project --stdlayout
+
+# Or with custom layout and fetching only recent revisions:
+git2svn init-mirror https://svn.example.com/repo/myproject my-project \
+    -T trunk -b branches -t tags \
+    --revision 5000:HEAD
+
+# Configure without fetching immediately:
+git2svn init-mirror https://svn.example.com/repo/myproject my-project --stdlayout --no-fetch
+```
+
+### What `init-mirror` does automatically:
+1. **Prerequisite Check:** Verifies `git-svn` is installed on your workstation, displaying package manager installation instructions if absent.
+2. **Git Repository Initialization:** Initializes an empty Git repository in the target directory (defaulting to the current working directory).
+3. **`git svn init`:** Configures Subversion remote tracking with standard or custom paths and remote ref prefix (`svn-mirror/`).
+4. **`git svn fetch`:** Downloads revisions from Subversion into `refs/remotes/svn-mirror/trunk`.
+5. **Branch Checkout:** Sets up the local `trunk` tracking branch.
+6. **Automatic `git2svn setup`:** Sets up the managed local SVN working copy (`.git/git2svn/svn_wc`), configures fast-forward pull policy, and sets up productivity aliases adapted for `git-svn`:
+   - `git svn-pull`: Invokes `git svn fetch` and merges/rebases the tracking branch.
+   - `git svn-push`: Invokes `git2svn replay`, updates the mirror via `git svn fetch`, and verifies alignment.
+
+### Options:
+- `--stdlayout`: Use standard Subversion layout (`trunk`, `branches`, `tags`).
+- `-T`, `--trunk <path>`: Subdirectory path for trunk (default: `trunk`).
+- `-b`, `--branches <path>`: Subdirectory path for branches (default: `branches`).
+- `-t`, `--tags <path>`: Subdirectory path for tags (default: `tags`).
+- `--prefix <prefix>`: Prefix for remote tracking refs (default: `svn-mirror/`).
+- `-r`, `--revision <rev>`: Initial SVN revision or range to fetch (e.g. `1000:HEAD`).
+- `--no-fetch`: Initialize configuration without immediately pulling revisions.
+- `-n`, `--dry-run`: Preview planned actions and commands without executing them.
+
+---
+
+## 10. Command: `completion`
 
 Generates standalone shell tab-completion scripts for `bash`, `zsh`, or `fish`. Autocompletes subcommands, options, and dynamically suggests Git branches, tags, and SVN branch names.
 
@@ -422,7 +463,7 @@ git2svn completion fish > ~/.config/fish/completions/git2svn.fish
 
 ---
 
-## 10. Structural Staging Mechanics
+## 11. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 
@@ -433,3 +474,4 @@ During patch application or file copying, `git2svn` maps Git status codes (`git 
 | **`M`** | Modified file | Contents updated via `patch` or direct copy (no SVN structural command needed) |
 | **`R`** | Renamed file (`R100 old new`) | Runs `svn rm <old>` followed by `svn add <new> --parents` |
 | **`C`** | Copied file (`C100 src dst`) | Runs `svn add <new> --parents` |
+

@@ -263,6 +263,78 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to SVN working copy or SVN repository URL (optional if already configured or set via --svn-dir/--svn-url)",
     )
 
+    # init-mirror
+    parser_mirror = subparsers.add_parser(
+        "init-mirror",
+        parents=[common_parser],
+        help="Bootstrap a local git-svn mirror remote and configure git2svn in one command",
+        description=(
+            "Initialize a local Subversion mirror tracking branch using git-svn and configure git2svn.\n"
+            "Runs 'git svn init', fetches remote revisions, and configures productivity aliases."
+        ),
+    )
+    parser_mirror.add_argument(
+        "svn_url",
+        type=str,
+        metavar="SVN_URL",
+        help="Subversion repository URL (e.g. 'https://svn.example.com/repo')",
+    )
+    parser_mirror.add_argument(
+        "target_dir",
+        nargs="?",
+        type=Path,
+        default=None,
+        metavar="TARGET_DIR",
+        help="Destination directory for Git repository (default: current directory or --git-dir)",
+    )
+    parser_mirror.add_argument(
+        "--stdlayout",
+        action="store_true",
+        default=False,
+        help="Use standard Subversion layout (trunk, branches, tags)",
+    )
+    parser_mirror.add_argument(
+        "-T",
+        "--trunk",
+        type=str,
+        default="trunk",
+        help="Subdirectory for trunk (default: 'trunk')",
+    )
+    parser_mirror.add_argument(
+        "-b",
+        "--branches",
+        type=str,
+        default="branches",
+        help="Subdirectory for branches (default: 'branches')",
+    )
+    parser_mirror.add_argument(
+        "-t",
+        "--tags",
+        type=str,
+        default="tags",
+        help="Subdirectory for tags (default: 'tags')",
+    )
+    parser_mirror.add_argument(
+        "--prefix",
+        type=str,
+        default="svn-mirror/",
+        help="Remote-tracking branch prefix (default: 'svn-mirror/')",
+    )
+    parser_mirror.add_argument(
+        "-r",
+        "--revision",
+        dest="from_revision",
+        type=str,
+        default=None,
+        help="Initial SVN revision or revision range to fetch (e.g. 'HEAD' or '1000:HEAD')",
+    )
+    parser_mirror.add_argument(
+        "--no-fetch",
+        action="store_true",
+        default=False,
+        help="Initialize git-svn configuration without immediately fetching revisions",
+    )
+
     # diff
     parser_diff = subparsers.add_parser(
         "diff",
@@ -382,6 +454,13 @@ def parse_cli_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         fix=False,
         install=False,
         interactive=False,
+        stdlayout=False,
+        trunk="trunk",
+        branches="branches",
+        tags="tags",
+        prefix="svn-mirror/",
+        from_revision=None,
+        no_fetch=False,
         replay_action=None,
     )
     return parser.parse_args(argv, namespace=namespace)
@@ -427,6 +506,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             svn_url=getattr(args, "svn_url", None),
             color=TerminalColor(color_mode),
             fix=getattr(args, "fix", False),
+        )
+
+    if args.command == "init-mirror":
+        from .mirror import run_init_mirror
+
+        return run_init_mirror(
+            svn_url=args.svn_url,
+            target_dir=getattr(args, "target_dir", None),
+            git_dir=git_dir,
+            trunk=getattr(args, "trunk", "trunk"),
+            branches=getattr(args, "branches", "branches"),
+            tags=getattr(args, "tags", "tags"),
+            stdlayout=getattr(args, "stdlayout", False),
+            prefix=getattr(args, "prefix", "svn-mirror/"),
+            from_revision=getattr(args, "from_revision", None),
+            no_fetch=getattr(args, "no_fetch", False),
+            dry_run=args.dry_run,
+            color_mode=color_mode,
         )
 
     if not git_repo.is_valid_repo():
