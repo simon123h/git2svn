@@ -92,6 +92,20 @@ To guarantee atomic correctness:
 - **`git2svn` automatically updates the working copy before staging or replaying**, ensuring your patches apply against the latest remote `HEAD`.
 - **`git2svn replay` automatically updates the working copy upon completion**, ensuring the working copy base revision is cleanly bumped to `HEAD` for immediate subsequent operations or mirror pulls.
 
+### 2.4 Auto-Skip Already Replayed Commits (`--force`)
+When working iteratively on a feature branch (e.g. replaying `main..feature`, adding another commit to `feature`, and running `main..feature` again), earlier commits are already present in Subversion. Attempting to re-patch them would trigger patch failures or duplicate commit noise.
+
+`git2svn replay` automatically inspects recent SVN commit logs:
+- Any commit whose exact message already exists in the recent SVN log is **automatically skipped** with an informative `[SKIP]` notice:
+  ```text
+  [SKIP] [1/3] a1b2c3d4 'feat: initial feature structure' already committed to SVN. Skipping.
+  [2/3] Applying c5d6e7f8: feat: add secondary calculation module... OK (0.15s)
+  ```
+- To bypass this automatic deduplication check and force replay of all commits, pass `--force`:
+  ```bash
+  git2svn replay main..feature --force
+  ```
+
 ---
 
 ## 3. Conflict Resolution Lifecycle

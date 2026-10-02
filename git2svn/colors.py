@@ -119,6 +119,9 @@ class TerminalColor:
     def paused_badge(self, text: str = "[PAUSED]") -> str:
         return self.bold_yellow(text)
 
+    def skip_badge(self, text: str = "[SKIP]") -> str:
+        return self.bold_cyan(text)
+
 
 class ColoredLogFormatter(logging.Formatter):
     """Custom logging formatter that colorizes and aligns log level prefixes using TerminalColor."""

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -384,3 +385,28 @@ class SvnWorkspace:
             raise parse_svn_error(res.stderr, "update", self.workspace_dir)
         if res.stdout:
             logger.info("SVN update output:\n%s", res.stdout.strip())
+
+    def get_recent_log_messages(self, limit: int = 25) -> List[str]:
+        """
+        Fetch the most recent commit log messages from the SVN repository using svn log --xml.
+        Returns a list of log message strings, ordered from newest to oldest.
+        """
+        if self.dry_run:
+            return []
+
+        res = self.run_cmd(["log", "--xml", "-l", str(limit)], check=False)
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+
+        messages: List[str] = []
+        try:
+            root = ET.fromstring(res.stdout)
+            for entry in root.findall("logentry"):
+                msg_elem = entry.find("msg")
+                if msg_elem is not None and msg_elem.text:
+                    messages.append(msg_elem.text)
+                else:
+                    messages.append("")
+        except Exception as e:
+            logger.debug("Failed to parse svn log --xml output: %s", e)
+        return messages

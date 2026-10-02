@@ -144,5 +144,20 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Architectural Justification for the SVN Working Copy:** Confirms why a local SVN working copy is indispensable over direct server-side transaction tools (e.g. `svnmucc`), as a local working copy is required to compute 3-way merges and surface interactive conflict markers.
   - **Accepts Patch Complexity:** Acknowledges the necessity of EOL normalization, reject handling, and whitespace tolerance as essential trade-offs to guarantee non-destructive concurrent synchronization.
 
+---
+
+### ADR-16: Automatic Duplicate Replay Skipping via SVN Log Inspection
+* **Context:** Developers frequently work iteratively on feature branches: committing changes, running `git2svn replay main..feature`, authoring further commits on the same feature branch, and running `git2svn replay main..feature` again before the upstream SVN mirror has synced back to `main`. When re-running `replay` across the full range, earlier commits in the branch are already present in Subversion. Re-applying those patches leads to failed patch applications (`.rej` artifacts) or redundant duplicate commits.
+* **Decision:**
+  1. Before executing the replay queue, query the most recent SVN commit log messages using `svn log --xml -l <limit>`.
+  2. For each Git commit in the queue, inspect whether its exact commit message already exists in the recent SVN log entries.
+  3. If matched, print an informative `[SKIP]` notice and advance to the next commit in the queue without attempting patch application or SVN commit.
+  4. Provide a `--force` CLI option on `git2svn replay` to bypass this check if a developer intentionally wishes to apply commits with identical commit messages.
+* **Consequences:**
+  - **Safe Iterative Replays:** Running `git2svn replay main..feature` multiple times on an evolving branch becomes idempotent and avoids spurious patch conflicts.
+  - **Decoupled from Upstream Mirror Latency:** Developers do not need to wait for `svn2git` or CI sync jobs to complete before continuing work and replaying new commits.
+  - **Zero Database State Needed:** Relies on Subversion's actual repository log as the authoritative source of truth, avoiding local metadata tracking corruption.
+
+
 
 

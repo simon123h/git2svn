@@ -171,9 +171,10 @@ class Synchronizer:
             shutil.rmtree(self.svn.workspace_dir, ignore_errors=True)
             logger.info("SVN workspace purged.")
 
-    def replay(self, ref1: str, ref2: Optional[str] = None) -> None:
+    def replay(self, ref1: str, ref2: Optional[str] = None, force: bool = False) -> None:
         """
         Replay a single commit or range of commits onto SVN, committing each with its Git message.
+        If force=False, commits already present in recent SVN logs are automatically skipped.
         """
         is_single, start_or_commit, end_ref = parse_ref_arguments(ref1, ref2)
         target_spec = f"{start_or_commit}..{end_ref}" if not is_single else start_or_commit
@@ -190,7 +191,7 @@ class Synchronizer:
         if is_single:
             commit_hash = start_or_commit
             logger.info("Replaying single commit %s", commit_hash)
-            self._execute_replay_queue([commit_hash], total_commits=1, start_index=1)
+            self._execute_replay_queue([commit_hash], total_commits=1, start_index=1, force=force)
         else:
             start_ref = start_or_commit
             assert end_ref is not None
@@ -208,7 +209,7 @@ class Synchronizer:
                 return
 
             logger.info("Starting replay of %d commit(s) from %s to %s...", len(commits), start_ref, end_ref)
-            self._execute_replay_queue(commits, total_commits=len(commits), start_index=1)
+            self._execute_replay_queue(commits, total_commits=len(commits), start_index=1, force=force)
 
     def replay_continue(self) -> None:
         """Resume an interrupted replay after user resolves conflicts."""
@@ -297,15 +298,42 @@ class Synchronizer:
             clear_replay_state(self.svn.workspace_dir)
             logger.info("Replay finished (last commit was skipped).")
 
-    def _execute_replay_queue(self, commits: List[str], total_commits: int, start_index: int) -> None:
+    def _execute_replay_queue(
+        self, commits: List[str], total_commits: int, start_index: int, force: bool = False
+    ) -> None:
         """Execute a list of commits sequentially, catching conflicts and persisting state."""
         queue_start = time.perf_counter()
         pad_width = len(str(total_commits))
+
+        # Check recent SVN commit log messages to detect already committed commits
+        recent_svn_msgs: List[str] = []
+        if not force and not self.dry_run:
+            recent_svn_msgs = self.svn.get_recent_log_messages(limit=max(25, len(commits) * 2))
+
         for idx, commit_hash in enumerate(commits, start=start_index):
             commit_msg = self.git.get_commit_message(commit_hash)
             first_line = commit_msg.splitlines()[0] if commit_msg else ""
             progress_prefix = f"[{idx:>{pad_width}}/{total_commits}] Applying {commit_hash[:8]}: {first_line}"
             logger.info(progress_prefix)
+
+            # Auto-skip if exact commit message already exists in recent SVN log entries
+            if not force and commit_msg.strip() in [m.strip() for m in recent_svn_msgs if m.strip()]:
+                skip_tag = self.color.skip_badge("[SKIP]")
+                skip_notice = (
+                    f"{skip_tag} [{idx:>{pad_width}}/{total_commits}] {commit_hash[:8]} '{first_line}' "
+                    "already committed to SVN. Skipping.\n"
+                )
+                if sys.stdout.isatty():
+                    sys.stdout.write(f"\r\033[K{skip_notice}")
+                else:
+                    sys.stdout.write(skip_notice)
+                sys.stdout.flush()
+                logger.info(
+                    "Commit %s '%s' matches recent SVN log entry. Auto-skipped (use --force to override).",
+                    commit_hash[:8],
+                    first_line,
+                )
+                continue
 
             # Interactive console progress output
             if sys.stdout.isatty():

@@ -261,6 +261,28 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
         items = self.workspace.get_unversioned_items()
         self.assertEqual(items, [Path("unversioned.txt"), Path("dir/nested.txt")])
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_get_recent_log_messages(self, mock_cmd):
+        """Verify get_recent_log_messages parses commit messages from svn log --xml."""
+        xml_output = """<?xml version="1.0" encoding="UTF-8"?>
+<log>
+<logentry revision="42">
+<author>simon</author>
+<date>2026-10-02T00:00:00.000000Z</date>
+<msg>feat: latest commit</msg>
+</logentry>
+<logentry revision="41">
+<author>simon</author>
+<date>2026-10-01T23:00:00.000000Z</date>
+<msg>feat: earlier commit</msg>
+</logentry>
+</log>
+"""
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout=xml_output, stderr="")
+        msgs = self.workspace.get_recent_log_messages(limit=2)
+        self.assertEqual(msgs, ["feat: latest commit", "feat: earlier commit"])
+        mock_cmd.assert_called_with(["log", "--xml", "-l", "2"], check=False)
+
 
 if __name__ == "__main__":
     unittest.main()

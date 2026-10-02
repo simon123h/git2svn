@@ -171,6 +171,12 @@ class TestGit2SvnE2E(unittest.TestCase):
         self.assertTrue(svn_calc.is_file())
         self.assertEqual(svn_calc.read_text(encoding="utf-8"), "def add(a, b):\n    return a + b\n")
 
+        # Running replay a second time should auto-skip both commits (exit code 0, without duplicate commits or patch failures)
+        dup_exit_code = cli_main(
+            ["replay", f"{base_hash}..{head_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+        )
+        self.assertEqual(dup_exit_code, 0)
+
     def test_e2e_replay_with_update_flag(self):
         """Test replay with --update updates the working copy base revision to HEAD."""
         base_file = self.git_dir / "initial.txt"

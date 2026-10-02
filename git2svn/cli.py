@@ -203,6 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Skip the current failed commit and continue with the next",
     )
+    parser_replay.add_argument(
+        "--force",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Bypass duplicate commit check (apply commits even if their messages match recent SVN log entries)",
+    )
 
     # setup
     parser_setup = subparsers.add_parser(
@@ -467,7 +473,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         file=sys.stderr,
                     )
                     return 1
-                sync_mgr.replay(ref1, ref2)
+                force = getattr(args, "force", False)
+                sync_mgr.replay(ref1, ref2, force=force)
         elif args.command == "status":
             return sync_mgr.status()
         elif args.command == "clean":

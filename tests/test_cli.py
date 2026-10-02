@@ -62,6 +62,10 @@ class TestCli(unittest.TestCase):
         self.assertEqual(args_skip.command, "replay")
         self.assertEqual(args_skip.replay_action, "skip")
 
+        args_force = git2svn.parse_cli_args(["replay", "main..feature", "--force", "-s", "/path/to/svn"])
+        self.assertEqual(args_force.command, "replay")
+        self.assertTrue(args_force.force)
+
     def test_version_cli(self):
         """Verify -V and --version flags output program version and exit with code 0."""
         for flag in ["-V", "--version"]:

@@ -760,6 +760,58 @@ class TestSynchronizer(unittest.TestCase):
         mgr.purge_workspace()
         self.assertFalse(temp_dir.exists())
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_auto_skips_already_committed_svn_entries(self, mock_svn_cmd):
+        """Verify replay auto-skips commits whose message is in recent SVN log, and --force bypasses."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        # Base commit
+        f = self.git_path / "dup.txt"
+        f.write_text("v1\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base commit"], cwd=self.git_path, check=True)
+        base_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # Commit 1 (already in SVN)
+        f.write_text("v2\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "feat: already replayed commit"], cwd=self.git_path, check=True)
+
+        # Commit 2 (new commit)
+        f.write_text("v3\n")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "feat: brand new commit"], cwd=self.git_path, check=True)
+        c2_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        # Simulate SVN log showing c1 was already committed
+        with patch.object(
+            self.svn_ws,
+            "get_recent_log_messages",
+            return_value=["feat: already replayed commit", "base commit"],
+        ):
+            with (
+                patch.object(self.sync_mgr, "_patch_and_stage_commit") as mock_stage,
+                patch.object(self.svn_ws, "commit") as mock_commit,
+            ):
+                # Replaying range base_hash..c2_hash:
+                # c1 must be skipped, c2 must be staged & committed
+                self.sync_mgr.replay(base_hash, c2_hash, force=False)
+                mock_stage.assert_called_once_with(c2_hash)
+                mock_commit.assert_called_once_with("feat: brand new commit")
+
+            with (
+                patch.object(self.sync_mgr, "_patch_and_stage_commit") as mock_stage_force,
+                patch.object(self.svn_ws, "commit") as mock_commit_force,
+            ):
+                # With force=True: both c1 and c2 must be staged & committed
+                self.sync_mgr.replay(base_hash, c2_hash, force=True)
+                self.assertEqual(mock_stage_force.call_count, 2)
+                self.assertEqual(mock_commit_force.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
