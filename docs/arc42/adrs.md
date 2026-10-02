@@ -217,6 +217,26 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Permission Fidelity:** Scripts (`.sh`, `.bat`, `.py`) and binaries committed in Git retain their exact executable status when checked out from Subversion.
   - **Zero Manual Overhead:** Developers do not need to remember Subversion property commands when modifying file modes (`chmod +x` / `chmod -x`).
 
+---
+
+### ADR-20: Pre-flight Environment and Configuration Diagnostics (`git2svn doctor`)
+* **Context:** Operating a bidirectional Git-to-SVN synchronization bridge involves multiple interdependent prerequisites: Git and Subversion binaries in PATH, local repository health, SVN working copy validity, remote mirror tracking branches, pre-push safety hooks, and fast-forward pull configurations. When onboarding new team members or troubleshooting synchronization failures, users often faced disparate errors across separate commands.
+* **Decision:**
+  1. Introduce a dedicated `git2svn doctor` diagnostic command that verifies all system and repository prerequisites in a single pass.
+  2. Implement structured pre-flight checks:
+     - **Git Environment:** CLI binary presence, version, repository validity, and working tree cleanliness.
+     - **Subversion Environment:** CLI binary presence and version.
+     - **SVN Working Copy:** Workspace resolution (CLI, env, config, managed WC), working copy directory existence, `.svn` validity, metadata retrieval, lock/clean status, and branch alignment.
+     - **Repository Configuration & Safety:** `git2svn.mirrorRemote` presence, tracking branch existence, `pull.ff=only` policy, productivity aliases (`git svn-push`, `git svn-pull`, `git svn-status`), and pre-push hook guard executable status.
+     - **Replay State:** Active or paused multi-commit replay session detection.
+  3. Output categorized results with color badges (`[OK]`, `[WARN]`, `[FAIL]`) and actionable resolution hints.
+  4. Return exit code `0` when all critical checks pass (advising on recommendations if warnings exist) and `1` if any critical failure occurs.
+* **Consequences:**
+  - **Rapid Troubleshooting & Triage:** Users and teams can diagnose setup, connectivity, and configuration issues instantly with a single command.
+  - **Proactive Failure Prevention:** Identifies missing safety hooks, unmerged branches, or lock issues before initiating synchronization or replay workflows.
+  - **Self-Documenting & Actionable:** Every warning or failure provides exact remedy instructions (e.g. running `git2svn setup`, installing hooks, or switching branches).
+
+
 
 
 

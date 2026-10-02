@@ -661,6 +661,29 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_replay.assert_called_once_with("svn-mirror/trunk..HEAD", None, force=False, assume_yes=True)
 
+    def test_doctor_args(self):
+        """Verify doctor subcommand CLI parsing."""
+        args = git2svn.parse_cli_args(["doctor"])
+        self.assertEqual(args.command, "doctor")
+
+        args_with_options = git2svn.parse_cli_args(
+            ["doctor", "--git-dir", "/path/to/git", "--svn-dir", "/path/to/svn", "--color", "never"]
+        )
+        self.assertEqual(args_with_options.command, "doctor")
+        self.assertEqual(args_with_options.git_dir, Path("/path/to/git"))
+        self.assertEqual(args_with_options.svn_dir, Path("/path/to/svn"))
+
+    def test_doctor_command_execution(self):
+        """Verify doctor command delegates to run_doctor."""
+        git_dir = self.path / "git_doctor"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("git2svn.doctor.run_doctor", return_value=0) as mock_doctor:
+            code = git2svn.main(["--git-dir", str(git_dir), "doctor"])
+            self.assertEqual(code, 0)
+            mock_doctor.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -104,6 +104,12 @@ class TerminalColor:
     def error(self, text: str = "Error") -> str:
         return self.bold_red(f"✖ {text}")
 
+    def ok_badge(self, text: str = "[OK]    ") -> str:
+        return self.bold_green(text)
+
+    def fail_badge(self, text: str = "[FAIL]  ") -> str:
+        return self.bold_red(text)
+
     def info_badge(self, text: str = "[INFO]  ") -> str:
         return self.bold_cyan(text)
 

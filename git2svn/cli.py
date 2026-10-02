@@ -299,6 +299,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Completely delete the local managed SVN working copy directory (fresh re-checkout)",
     )
 
+    # doctor
+    subparsers.add_parser(
+        "doctor",
+        parents=[common_parser],
+        help="Run pre-flight diagnostics on Git, SVN, hooks, and repository configuration",
+        description=(
+            "Inspect system prerequisites, Git/SVN CLI binaries, repository configuration,\n"
+            "pre-push hook guard, and SVN working copy connectivity/health."
+        ),
+    )
+
     return parser
 
 
@@ -357,6 +368,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     root_logger.handlers = [handler]
+
+    if args.command == "doctor":
+        from .doctor import run_doctor
+
+        return run_doctor(
+            git_repo,
+            svn_dir=getattr(args, "svn_dir", None),
+            svn_url=getattr(args, "svn_url", None),
+            color=TerminalColor(color_mode),
+        )
 
     if not git_repo.is_valid_repo():
         print(f"Error: '{git_dir}' is not a valid Git repository.", file=sys.stderr)

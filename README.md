@@ -99,7 +99,10 @@ git2svn replay --continue
 git2svn clean
 git2svn clean --purge
 
-# 8. Or use the built-in Git aliases created during setup:
+# 8. Run pre-flight environment & configuration diagnostics
+git2svn doctor
+
+# 9. Or use the built-in Git aliases created during setup:
 git svn-push     # Replay trunk commits to SVN and fetch mirror
 git svn-pull     # Pull fresh SVN mirror commits & rebase local trunk
 git svn-status   # Run git2svn status

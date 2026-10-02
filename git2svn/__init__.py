@@ -8,6 +8,7 @@ from __future__ import annotations
 from .cli import build_parser, main, parse_cli_args
 from .colors import ColoredLogFormatter, TerminalColor
 from .core import Synchronizer
+from .doctor import CheckResult, Doctor, run_doctor
 from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
 from .patcher import Patcher
@@ -52,6 +53,9 @@ __all__ = [
     "TerminalColor",
     "ColoredLogFormatter",
     "StatusReporter",
+    "Doctor",
+    "run_doctor",
+    "CheckResult",
     "run_setup",
     "FileChange",
     "parse_ref_arguments",

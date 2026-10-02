@@ -1,4 +1,4 @@
-# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `status` & `clean`
+# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `status`, `clean` & `doctor`
 
 This document details the usage, flags, and mechanics for all `git2svn` commands.
 
@@ -294,7 +294,52 @@ git2svn clean --purge
 
 ---
 
-## 8. Structural Staging Mechanics
+## 8. Command: `doctor`
+
+Runs pre-flight diagnostics to inspect your environment, verify tool prerequisites (Git and Subversion CLI binaries), check repository and mirror tracking configurations, inspect pre-push hooks, and validate SVN working copy health.
+
+```bash
+# Run diagnostics on the current repository and workspace:
+git2svn doctor
+
+# Check a specific Git repository or SVN working copy:
+git2svn doctor --git-dir /path/to/repo --svn-dir /path/to/svn
+```
+
+### What `doctor` diagnoses:
+- **Git Environment:**
+  - `git` CLI executable available in PATH and version.
+  - Current directory validity as a Git repository, active branch, and latest commit.
+  - Git working tree cleanliness (detects uncommitted modifications or untracked files).
+- **Subversion Environment:**
+  - `svn` CLI executable detected (supporting standard Unix paths, TortoiseSVN, and SlikSVN) and version.
+- **SVN Working Copy:**
+  - Working copy resolution (CLI argument, `$SVN_DIR`, `git2svn.svnDir`, or managed workspace in `.git/git2svn/svn_wc`).
+  - Working copy validity (`.svn` presence and metadata parsing).
+  - Remote repository accessibility, target URL, and base revision.
+  - Working copy cleanliness and lock status (detects locks requiring `svn cleanup`).
+  - Branch alignment (verifies that the checked out SVN branch matches the active Git branch or trunk).
+- **Repository Configuration & Safety:**
+  - `git2svn.mirrorRemote` configuration and presence in `git remote`.
+  - Remote mirror tracking branch existence (e.g. `origin/trunk` or `<mirrorRemote>/<branch>`).
+  - Fast-forward pull policy (`pull.ff = only`).
+  - Productivity aliases (`git svn-push`, `git svn-pull`, `git svn-status`).
+  - Pre-push hook guard installation and executable permissions (`.git/hooks/pre-push`).
+- **Replay State:**
+  - Scans for paused replay sessions blocked by patch conflicts.
+
+### Diagnostic Badges & Exit Codes:
+- `[OK]   `: The check passed completely.
+- `[WARN] `: Non-critical recommendation or missing optional feature (hints provided on how to resolve).
+- `[FAIL] `: Critical failure blocking synchronization (actionable remediation provided).
+
+**Exit Codes:**
+- `0`: All critical checks passed (workspace is functional).
+- `1`: One or more critical checks failed.
+
+---
+
+## 9. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 
