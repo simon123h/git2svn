@@ -71,6 +71,77 @@ class TestSvnWorkspace(unittest.TestCase):
             errors="replace",
         )
 
+    @patch("subprocess.run")
+    def test_property_operations(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="*\n", stderr="")
+
+        # Test get_property
+        val = self.svn.get_property("svn:executable", Path("script.sh"))
+        self.assertEqual(val, "*")
+        mock_run.assert_called_with(
+            [self.svn.svn_bin, "propget", "svn:executable", "script.sh"],
+            cwd=self.workspace_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        # Test set_property
+        self.svn.set_property("svn:executable", "*", Path("script.sh"))
+        mock_run.assert_called_with(
+            [self.svn.svn_bin, "propset", "svn:executable", "*", "script.sh"],
+            cwd=self.workspace_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        # Test del_property
+        self.svn.del_property("svn:executable", Path("script.sh"))
+        mock_run.assert_called_with(
+            [self.svn.svn_bin, "propdel", "svn:executable", "script.sh"],
+            cwd=self.workspace_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def test_sync_file_executable_property(self):
+        with (
+            patch.object(self.svn, "get_property") as mock_get,
+            patch.object(self.svn, "set_property") as mock_set,
+            patch.object(self.svn, "del_property") as mock_del,
+        ):
+            # When executable and prop missing -> propset
+            mock_get.return_value = None
+            self.svn.sync_file_executable_property("run.sh", is_executable=True)
+            mock_set.assert_called_once_with("svn:executable", "*", Path("run.sh"))
+            mock_del.assert_not_called()
+
+            # When executable and prop already present -> no-op
+            mock_set.reset_mock()
+            mock_get.return_value = "*"
+            self.svn.sync_file_executable_property("run.sh", is_executable=True)
+            mock_set.assert_not_called()
+            mock_del.assert_not_called()
+
+            # When non-executable and prop present -> propdel
+            mock_get.return_value = "*"
+            self.svn.sync_file_executable_property("run.sh", is_executable=False)
+            mock_del.assert_called_once_with("svn:executable", Path("run.sh"))
+
+            # When non-executable and prop missing -> no-op
+            mock_del.reset_mock()
+            mock_get.return_value = None
+            self.svn.sync_file_executable_property("run.sh", is_executable=False)
+            mock_del.assert_not_called()
+
 
 class TestSvnLockAndCollisionHandling(unittest.TestCase):
     def setUp(self):

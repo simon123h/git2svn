@@ -538,6 +538,7 @@ class Synchronizer:
                     normalize_file_eol(target_file, target_eol=orig_eol)
 
         self.svn.apply_structural_changes(changes)
+        self._sync_executable_properties(commit_hash, changes)
 
     def _patch_and_stage_range(self, start_ref: str, end_ref: str) -> None:
         """Extract diff between two references, apply using git apply, and stage in SVN."""
@@ -562,6 +563,17 @@ class Synchronizer:
                     normalize_file_eol(target_file, target_eol=orig_eol)
 
         self.svn.apply_structural_changes(changes)
+        self._sync_executable_properties(end_ref, changes)
+
+    def _sync_executable_properties(self, target_ref: str, changes: List[FileChange]) -> None:
+        """Synchronize svn:executable properties for all added/modified/renamed files."""
+        for change in changes:
+            if not change.is_deleted:
+                mode = self.git.get_file_mode(target_ref, change.path)
+                if mode == "100755":
+                    self.svn.sync_file_executable_property(change.path, is_executable=True)
+                elif mode == "100644":
+                    self.svn.sync_file_executable_property(change.path, is_executable=False)
 
     def _copy_and_stage_range(self, base_ref: str, target_ref: str) -> None:
         """Brute-force copy changed files using Git object DB, and stage in SVN."""
@@ -619,6 +631,8 @@ class Synchronizer:
         for change in changes:
             if change.is_added or change.is_renamed or change.is_copied:
                 self.svn.stage_add(change.path)
+
+        self._sync_executable_properties(target_ref, changes)
 
     def _ensure_parent_dirs_for_changes(self, changes: List[FileChange]) -> None:
         """Create parent directories in SVN workspace for new/renamed files."""

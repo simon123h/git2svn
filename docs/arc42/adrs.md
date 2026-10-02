@@ -204,6 +204,19 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Topology Harmonization:** The pre-push hook guard and synchronization engine both reference `git2svn.mirrorRemote`.
   - **Lean & Unified Mental Model:** Eliminates split-brain configuration between static ranges and dynamic mirror branches. All range overrides are explicit CLI arguments.
 
+---
+
+### ADR-19: Automatic File Permission & `svn:executable` Synchronization
+* **Context:** In Git, executable file status is tracked directly in tree object modes (`100755` for executable scripts/binaries, `100644` for regular files). Subversion, however, relies entirely on the `svn:executable` property to set POSIX execute bits upon checkout. Without explicit property management, executable files committed via `git2svn` lose their executable permissions in Subversion checkouts, causing build/script failures for SVN users.
+* **Decision:**
+  1. Add property management primitives (`set_property`, `del_property`, `get_property`, and `sync_file_executable_property`) to `SvnWorkspace`.
+  2. During staging (`stage`, `replay`, copy mode, and snapshot mode), inspect the Git file mode (`100755` vs `100644`) for all non-deleted files.
+  3. When Git mode is `100755`, automatically set `svn:executable` (`*`) if missing.
+  4. When Git mode changes back to `100644`, automatically delete `svn:executable` if present.
+* **Consequences:**
+  - **Permission Fidelity:** Scripts (`.sh`, `.bat`, `.py`) and binaries committed in Git retain their exact executable status when checked out from Subversion.
+  - **Zero Manual Overhead:** Developers do not need to remember Subversion property commands when modifying file modes (`chmod +x` / `chmod -x`).
+
 
 
 

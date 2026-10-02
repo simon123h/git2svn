@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -449,3 +450,54 @@ class TestGit2SvnE2E(unittest.TestCase):
         self.assertEqual(
             (managed_wc / "managed_demo.txt").read_text(encoding="utf-8"), "Synced via managed working copy!\n"
         )
+
+    def test_e2e_executable_property_sync(self):
+        """Test git2svn preserves and updates svn:executable when Git file mode changes."""
+        # 1. Base commit in Git with normal script file
+        script_file = self.git_dir / "service.sh"
+        script_file.write_text("#!/bin/sh\necho 'hello'\n", encoding="utf-8")
+        base_hash = self._git_commit("feat: add non-executable script")
+
+        # Initial commit in SVN
+        (self.svn_wc_dir / "service.sh").write_text("#!/bin/sh\necho 'hello'\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "add", "service.sh"], cwd=self.svn_wc_dir, check=True, capture_output=True)
+        subprocess.run([SVN_BIN, "commit", "-m", "init service"], cwd=self.svn_wc_dir, check=True, capture_output=True)
+
+        # 2. Make script executable in Git (+x)
+        os.chmod(script_file, 0o755)
+        subprocess.run([GIT_BIN, "update-index", "--chmod=+x", "service.sh"], cwd=self.git_dir, check=True)
+        exec_hash = self._git_commit("chore: chmod +x service.sh")
+
+        # Replay to SVN
+        code1 = cli_main(["replay", f"{base_hash}..{exec_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertEqual(code1, 0)
+
+        # Verify svn:executable is now set on service.sh in SVN
+        pg_res = subprocess.run(
+            [SVN_BIN, "propget", "svn:executable", "service.sh"],
+            cwd=self.svn_wc_dir,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(pg_res.returncode, 0)
+        self.assertEqual(pg_res.stdout.strip(), "*")
+
+        # 3. Remove executable bit in Git (-x)
+        os.chmod(script_file, 0o644)
+        subprocess.run([GIT_BIN, "update-index", "--chmod=-x", "service.sh"], cwd=self.git_dir, check=True)
+        no_exec_hash = self._git_commit("chore: chmod -x service.sh")
+
+        # Replay to SVN
+        code2 = cli_main(
+            ["replay", f"{exec_hash}..{no_exec_hash}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+        )
+        self.assertEqual(code2, 0)
+
+        # Verify svn:executable was deleted in SVN
+        pg_res2 = subprocess.run(
+            [SVN_BIN, "propget", "svn:executable", "service.sh"],
+            cwd=self.svn_wc_dir,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(pg_res2.returncode, 0)

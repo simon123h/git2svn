@@ -101,6 +101,12 @@ class SnapshotSynchronizer:
                             dst_path.unlink()
                         dst_path.write_bytes(target_bytes)
 
+            if mode != "120000":
+                if mode == "100755":
+                    self.svn.sync_file_executable_property(rel_path, is_executable=True)
+                elif mode == "100644":
+                    self.svn.sync_file_executable_property(rel_path, is_executable=False)
+
         # 3. Handle added files: extract from Git and run svn add
         for rel_path in added_files:
             logger.info("SVN staging snapshot add: %s", rel_path)
@@ -123,6 +129,12 @@ class SnapshotSynchronizer:
                     normalize_file_eol(dst_path)
 
                 self.svn.stage_add(rel_path)
+
+            if mode != "120000":
+                if mode == "100755":
+                    self.svn.sync_file_executable_property(rel_path, is_executable=True)
+                elif mode == "100644":
+                    self.svn.sync_file_executable_property(rel_path, is_executable=False)
 
         logger.info(
             "Snapshot staging completed: %d added, %d deleted, %d modified (uncommitted).",

@@ -324,6 +324,56 @@ class SvnWorkspace:
                 logger.error("Failed to 'svn rm %s': %s", posix_path, res.stderr.strip())
                 raise parse_svn_error(res.stderr, f"remove '{posix_path}'", self.workspace_dir)
 
+    def set_property(self, prop_name: str, prop_val: str, path: Path | str) -> None:
+        """Set an SVN property on a file in the working copy."""
+        target = Path(path).as_posix()
+        if self.dry_run:
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} propset {prop_name} {prop_val} {target}")
+            return
+        res = self.run_cmd(["propset", prop_name, prop_val, target], check=False)
+        if res.returncode != 0:
+            logger.warning("Failed to set property %s on %s: %s", prop_name, target, res.stderr.strip())
+
+    def del_property(self, prop_name: str, path: Path | str) -> None:
+        """Remove an SVN property from a file in the working copy."""
+        target = Path(path).as_posix()
+        if self.dry_run:
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} propdel {prop_name} {target}")
+            return
+        res = self.run_cmd(["propdel", prop_name, target], check=False)
+        if res.returncode != 0:
+            logger.warning("Failed to delete property %s on %s: %s", prop_name, target, res.stderr.strip())
+
+    def get_property(self, prop_name: str, path: Path | str) -> Optional[str]:
+        """Get the value of an SVN property, or None if not set."""
+        target = Path(path).as_posix()
+        if self.dry_run:
+            return None
+        res = self.run_cmd(["propget", prop_name, target], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+        return None
+
+    def sync_file_executable_property(self, path: Path | str, is_executable: bool) -> None:
+        """Synchronize the svn:executable property on path with the given boolean flag."""
+        target = Path(path)
+        if self.dry_run:
+            action = (
+                f"propset svn:executable * {target.as_posix()}"
+                if is_executable
+                else f"propdel svn:executable {target.as_posix()}"
+            )
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} {action}")
+            return
+
+        has_prop = self.get_property("svn:executable", target) is not None
+        if is_executable and not has_prop:
+            logger.info("SVN staging propset svn:executable on: %s", target.as_posix())
+            self.set_property("svn:executable", "*", target)
+        elif not is_executable and has_prop:
+            logger.info("SVN staging propdel svn:executable on: %s", target.as_posix())
+            self.del_property("svn:executable", target)
+
     def commit(self, message: str) -> None:
         """Run svn commit using a temporary file with -F to support arbitrary message lengths and encodings."""
         if self.dry_run:
