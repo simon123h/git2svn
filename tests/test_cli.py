@@ -724,6 +724,56 @@ class TestCli(unittest.TestCase):
             self.assertEqual(code, 0)
             mock_comp.assert_called_once_with(shell="bash", install=False)
 
+    def test_cli_config_dry_run_and_copy(self):
+        """Verify git2svn.dryRun and git2svn.copy git configs are respected."""
+        git_dir = self.path / "git_cfg"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+        git_repo = git2svn.GitRepo(git_dir)
+        git_repo.set_config("git2svn.dryRun", "true")
+        git_repo.set_config("git2svn.copy", "true")
+
+        svn_dir = self.path / "svn_cfg"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.Synchronizer.stage") as mock_stage:
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage", "HEAD"])
+            self.assertEqual(code, 0)
+            mock_stage.assert_called_once()
+            self.assertTrue(mock_stage.call_args.kwargs.get("use_copy", False))
+
+    def test_cli_color_from_git_config(self):
+        """Verify git2svn.color in git config is used when --color is omitted."""
+        git_dir = self.path / "git_color"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+        git_repo = git2svn.GitRepo(git_dir)
+        git_repo.set_config("git2svn.color", "always")
+
+        svn_dir = self.path / "svn_color"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+
+        with patch("git2svn.Synchronizer.stage"):
+            with patch("git2svn.colors.TerminalColor.__init__", return_value=None) as mock_color_init:
+                code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "stage", "HEAD"])
+                self.assertEqual(code, 0)
+                mock_color_init.assert_called_with("always")
+
+    def test_cli_invalid_svn_working_copy_error(self):
+        """Verify CLI exits with code 1 if svn-dir is not a valid SVN working copy."""
+        git_dir = self.path / "git_inv_svn"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        not_svn = self.path / "not_svn_dir"
+        not_svn.mkdir()
+
+        with patch("sys.stderr"):
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(not_svn), "stage", "HEAD"])
+            self.assertEqual(code, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

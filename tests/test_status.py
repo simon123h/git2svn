@@ -240,6 +240,75 @@ class TestStatus(unittest.TestCase):
             printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
             self.assertTrue(any("svn-mirror/trunk..HEAD" in line for line in printed_lines))
 
+    def test_status_with_paused_replay_and_rej_files(self):
+        """Status reports active conflicts and rej files during paused replay."""
+        (self.svn_path / "broken.txt.rej").write_text("patch rejection")
+        with (
+            patch(
+                "git2svn.status.load_replay_session",
+                return_value=git2svn.state.ReplayState(
+                    git_dir=str(self.git_path),
+                    svn_dir=str(self.svn_path),
+                    current_commit="12345678",
+                    current_commit_msg="broken commit",
+                    remaining_commits=["remaining1"],
+                    total_commits=2,
+                    completed_commits=0,
+                ),
+            ),
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "1"}),
+            patch("builtins.print") as mock_print,
+        ):
+            self.sync_mgr.status()
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Conflicts : broken.txt.rej" in line for line in printed_lines))
+
+    def test_status_dirty_git_tree(self):
+        """Status reports dirty when Git workspace has uncommitted changes."""
+        (self.git_path / "uncommitted.txt").write_text("changes")
+        with (
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "1"}),
+            patch("builtins.print") as mock_print,
+        ):
+            self.sync_mgr.status()
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("Dirty" in line for line in printed_lines))
+
+    def test_status_single_commit_range(self):
+        """Status handles single commit range."""
+        (self.git_path / "single.txt").write_text("hello")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "single commit"], cwd=self.git_path, check=True)
+        head = self.git_repo.get_head_commit()
+
+        with (
+            patch("git2svn.status.resolve_sync_range", return_value=head),
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "1"}),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(any("1 commit(s) ready to replay" in line for line in printed_lines))
+
+    def test_status_unknown_range_refs(self):
+        """Status warns when start_ref or end_ref is missing in Git."""
+        with (
+            patch("git2svn.status.resolve_sync_range", return_value="nonexistent_start..HEAD"),
+            patch.object(self.svn_workspace, "is_clean", return_value=True),
+            patch.object(self.svn_workspace, "get_info", return_value={"URL": "file:///svn/trunk", "Revision": "1"}),
+            patch("builtins.print") as mock_print,
+        ):
+            code = self.sync_mgr.status()
+            self.assertEqual(code, 0)
+            printed_lines = [call[0][0] for call in mock_print.call_args_list if call[0]]
+            self.assertTrue(
+                any("Range start ref 'nonexistent_start' not found in Git" in line for line in printed_lines)
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

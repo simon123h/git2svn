@@ -363,6 +363,80 @@ class TestDoctor(unittest.TestCase):
         self.assertIn("[Applying Automatic Fixes]", out)
         self.assertIn("[FIXED]", out)
 
+    def test_check_svn_cli_fallback_without_quiet(self):
+        doctor = Doctor(self.git_repo, color=self.color)
+
+        def fake_run(cmd, **kwargs):
+            if "--quiet" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unknown option")
+            return subprocess.CompletedProcess(cmd, 0, stdout="svn, version 1.14.2 (r1899510)\ncompiled...", stderr="")
+
+        with patch("shutil.which", return_value="/usr/bin/svn"), patch("subprocess.run", side_effect=fake_run):
+            res = doctor.check_svn_cli()
+            self.assertEqual(res.status, "OK")
+            self.assertIn("svn, version 1.14.2", res.message)
+
+    def test_check_svn_workspace_dirty(self):
+        svn_dir = self.path / "dirty_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+        doctor = Doctor(self.git_repo, svn_dir=svn_dir, color=self.color)
+
+        with (
+            patch("git2svn.doctor.SvnWorkspace.is_valid_workspace", return_value=True),
+            patch("git2svn.doctor.SvnWorkspace.get_info", return_value={"url": "http://example.com/svn"}),
+            patch("git2svn.doctor.SvnWorkspace.is_clean", return_value=False),
+            patch("git2svn.doctor.SvnWorkspace.get_status_summary", return_value=["M file.txt", "? untracked.txt"]),
+        ):
+            results = doctor.check_svn_workspace()
+            state_result = next(r for r in results if r.name == "Working Copy State")
+            self.assertEqual(state_result.status, "WARN")
+            self.assertIn("Dirty (2 uncommitted or untracked changes)", state_result.message)
+
+    def test_apply_fixes_existing_pre_push_hook_without_guard(self):
+        hook_path = self.git_dir / ".git" / "hooks" / "pre-push"
+        hook_path.parent.mkdir(parents=True, exist_ok=True)
+        hook_path.write_text("#!/bin/sh\n# custom team hook\nexit 0\n", encoding="utf-8")
+        doctor = Doctor(self.git_repo, color=self.color)
+
+        fixes = doctor.apply_fixes()
+        hook_fix = next(f for f in fixes if f.name == "Pre-push Hook Guard")
+        self.assertTrue(hook_fix.success)
+        content = hook_path.read_text(encoding="utf-8")
+        self.assertIn("# --- START GIT2SVN PRE-PUSH GUARD ---", content)
+        self.assertIn("# custom team hook", content)
+
+    def test_apply_fixes_managed_svn_checkout_failure(self):
+        managed_dir = self.path / "fail_checkout_svn"
+        doctor = Doctor(
+            self.git_repo,
+            svn_dir=managed_dir,
+            svn_url="http://invalid.example.com",
+            color=self.color,
+        )
+        with patch("git2svn.doctor.checkout_working_copy", side_effect=RuntimeError("connection timeout")):
+            fixes = doctor.apply_fixes()
+            fail_fix = next(f for f in fixes if f.name == "Working Copy Presence")
+            self.assertFalse(fail_fix.success)
+            self.assertIn("connection timeout", fail_fix.message)
+
+    def test_apply_fixes_svn_cleanup_when_locked(self):
+        svn_dir = self.path / "locked_svn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+        doctor = Doctor(self.git_repo, svn_dir=svn_dir, color=self.color)
+
+        fake_status_res = subprocess.CompletedProcess([], 1, stdout="", stderr="svn: E155004: Working copy locked")
+        with (
+            patch("git2svn.doctor.SvnWorkspace.is_valid_workspace", return_value=True),
+            patch("git2svn.doctor.SvnWorkspace.run_cmd", return_value=fake_status_res),
+            patch("git2svn.doctor.SvnWorkspace.cleanup") as mock_cleanup,
+        ):
+            fixes = doctor.apply_fixes()
+            cleanup_fix = next(f for f in fixes if f.name == "SVN Cleanup")
+            self.assertTrue(cleanup_fix.success)
+            mock_cleanup.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

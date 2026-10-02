@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 import unittest
@@ -929,6 +930,183 @@ class TestSynchronizer(unittest.TestCase):
             self.assertEqual(target, "^/branches/v2.0")
             mock_switch.assert_called_once_with("v2.0")
             mock_print.assert_called_once_with("Switched SVN working copy to: v2.0 (^/branches/v2.0)")
+
+    def test_synchronizer_diff_passthrough(self):
+        """Verify Synchronizer.diff delegates to SvnWorkspace.diff."""
+        with patch.object(self.svn_ws, "diff", return_value="stat diff") as mock_diff:
+            res = self.sync_mgr.diff(stat=True)
+            self.assertEqual(res, "stat diff")
+            mock_diff.assert_called_once_with(stat=True)
+
+    def test_synchronizer_clean_dry_run(self):
+        """Verify clean in dry-run mode prints action without modifying workspace."""
+        dry_mgr = git2svn.Synchronizer(self.git_repo, self.svn_ws, self.patcher, dry_run=True)
+        with patch("builtins.print") as mock_print, patch.object(self.svn_ws, "cleanup") as mock_cleanup:
+            dry_mgr.clean()
+            mock_cleanup.assert_not_called()
+            mock_print.assert_called_once()
+            self.assertIn("[DRY-RUN]", mock_print.call_args[0][0])
+
+    def test_synchronizer_clean_lock_warning(self):
+        """Verify clean logs warning when svn cleanup encounters an issue."""
+        with (
+            patch.object(self.svn_ws, "cleanup", side_effect=Exception("cleanup failed")),
+            patch.object(self.svn_ws, "revert_all"),
+            patch.object(self.svn_ws, "get_unversioned_items", return_value=[]),
+            self.assertLogs("git2svn", level="WARNING") as cm,
+        ):
+            self.sync_mgr.clean()
+        self.assertTrue(any("svn cleanup reported" in msg for msg in cm.output))
+
+    def test_stage_copy_mode_symlink(self):
+        """Verify copy mode creates symlinks for mode 120000 changes."""
+        (self.git_path / "base.txt").write_text("base")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init base"], cwd=self.git_path, check=True)
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        (self.git_path / "target.txt").write_text("target")
+        os.symlink("target.txt", self.git_path / "link.txt")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "add symlink"], cwd=self.git_path, check=True)
+        h = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with (
+            patch.object(self.svn_ws, "stage_add"),
+            patch.object(self.svn_ws, "stage_rm"),
+            patch.object(self.svn_ws, "update"),
+        ):
+            self.sync_mgr.stage(f"{base}..{h}", use_copy=True)
+
+        svn_link = self.svn_path / "link.txt"
+        self.assertTrue(svn_link.is_symlink())
+        self.assertEqual(os.readlink(svn_link), "target.txt")
+
+    def test_replay_merge_commits_error(self):
+        """Verify replay raises RuntimeError when range contains merge commits."""
+        (self.git_path / "f.txt").write_text("base")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        subprocess.run(["git", "checkout", "-b", "side_branch"], cwd=self.git_path, check=True, capture_output=True)
+        (self.git_path / "side.txt").write_text("side")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "side commit"], cwd=self.git_path, check=True)
+
+        subprocess.run(["git", "checkout", "main"], cwd=self.git_path, check=True, capture_output=True)
+        (self.git_path / "main.txt").write_text("main")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "main commit"], cwd=self.git_path, check=True)
+
+        subprocess.run(["git", "merge", "--no-ff", "side_branch", "-m", "merge side"], cwd=self.git_path, check=True)
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with patch.object(self.svn_ws, "is_clean", return_value=True), patch.object(self.svn_ws, "update"):
+            with self.assertRaises(RuntimeError) as cm:
+                self.sync_mgr.replay(f"{base}..{head}")
+            self.assertIn("contains 1 merge commit(s)", str(cm.exception))
+
+    def test_replay_empty_range(self):
+        """Verify replay returns early with info log when no commits are in range."""
+        (self.git_path / "f.txt").write_text("base")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "base"], cwd=self.git_path, check=True)
+        h = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with patch.object(self.svn_ws, "is_clean", return_value=True), patch.object(self.svn_ws, "update"):
+            with patch.object(self.sync_mgr, "_execute_replay_queue") as mock_exec:
+                self.sync_mgr.replay(f"{h}..{h}")
+                mock_exec.assert_not_called()
+
+    def test_replay_continue_with_rej_files_error(self):
+        """Verify replay_continue raises RuntimeError if unresolved .rej files exist."""
+        (self.svn_path / "unresolved.rej").write_text("reject")
+        with patch(
+            "git2svn.core.load_replay_session",
+            return_value=git2svn.state.ReplayState(
+                git_dir=str(self.git_path),
+                svn_dir=str(self.svn_path),
+                current_commit="123",
+                current_commit_msg="msg",
+                remaining_commits=[],
+                total_commits=1,
+                completed_commits=0,
+                state="CONFLICT_PAUSED",
+            ),
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                self.sync_mgr.replay_continue()
+            self.assertIn("Found rejected patch artifacts", str(cm.exception))
+
+    def test_replay_abort_no_session_error(self):
+        """Verify replay_abort raises RuntimeError if no session is active."""
+        with patch("git2svn.core.load_replay_session", return_value=None):
+            with self.assertRaises(RuntimeError) as cm:
+                self.sync_mgr.replay_abort()
+            self.assertIn("No replay in progress", str(cm.exception))
+
+    def test_replay_svn_error_propagation(self):
+        """Verify SvnError during commit is printed and re-raised directly."""
+        (self.git_path / "f.txt").write_text("content")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 1"], cwd=self.git_path, check=True)
+        h = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with (
+            patch.object(self.svn_ws, "is_clean", return_value=True),
+            patch.object(self.svn_ws, "update"),
+            patch.object(self.sync_mgr, "_patch_and_stage_commit"),
+            patch.object(self.svn_ws, "commit", side_effect=git2svn.SvnError("Working copy locked")),
+        ):
+            with self.assertRaises(git2svn.SvnError):
+                self.sync_mgr.replay(h)
+
+    def test_stage_copy_mode_deletions_and_renames(self):
+        """Verify copy mode handles file deletions and renames in SVN."""
+        (self.git_path / "base.txt").write_text("base")
+        (self.git_path / "to_delete.txt").write_text("delete me")
+        (self.git_path / "old_name.txt").write_text("rename me")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "init base"], cwd=self.git_path, check=True)
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        (self.svn_path / "to_delete.txt").write_text("delete me")
+        (self.svn_path / "old_name.txt").write_text("rename me")
+
+        # In Git, delete to_delete.txt and rename old_name.txt to new_name.txt
+        (self.git_path / "to_delete.txt").unlink()
+        subprocess.run(["git", "rm", "to_delete.txt"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "mv", "old_name.txt", "new_name.txt"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "delete and rename"], cwd=self.git_path, check=True)
+        h = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with (
+            patch.object(self.svn_ws, "stage_add"),
+            patch.object(self.svn_ws, "stage_rm") as mock_stage_rm,
+            patch.object(self.svn_ws, "update"),
+        ):
+            self.sync_mgr.stage(f"{base}..{h}", use_copy=True)
+            self.assertTrue(mock_stage_rm.called)
+            self.assertFalse((self.svn_path / "to_delete.txt").exists())
+            self.assertFalse((self.svn_path / "old_name.txt").exists())
+            self.assertTrue((self.svn_path / "new_name.txt").exists())
 
 
 if __name__ == "__main__":

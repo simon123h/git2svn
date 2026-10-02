@@ -1,3 +1,4 @@
+import io
 import subprocess
 import tempfile
 import unittest
@@ -429,6 +430,60 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
                 mock_cmd.assert_not_called()
                 mock_print.assert_called_once()
                 self.assertIn("[DRY-RUN]", mock_print.call_args[0][0])
+
+    def test_svn_properties_dry_run(self):
+        """Verify property operations in dry_run mode print without invoking svn."""
+        dry_svn = git2svn.SvnWorkspace(self.workspace.workspace_dir, dry_run=True)
+        fake_stdout = io.StringIO()
+        with patch("sys.stdout", fake_stdout), patch.object(dry_svn, "run_cmd") as mock_cmd:
+            dry_svn.set_property("custom:prop", "val", "file.txt")
+            dry_svn.del_property("custom:prop", "file.txt")
+            self.assertIsNone(dry_svn.get_property("custom:prop", "file.txt"))
+            dry_svn.sync_file_executable_property("script.sh", is_executable=True)
+            dry_svn.sync_file_executable_property("script.sh", is_executable=False)
+            mock_cmd.assert_not_called()
+
+        out = fake_stdout.getvalue()
+        self.assertIn("[DRY-RUN]", out)
+        self.assertIn("propset custom:prop val file.txt", out)
+        self.assertIn("propdel custom:prop file.txt", out)
+        self.assertIn("propset svn:executable * script.sh", out)
+        self.assertIn("propdel svn:executable script.sh", out)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_svn_properties_execution_and_warnings(self, mock_cmd):
+        """Verify property commands log warning on non-zero return code."""
+        mock_cmd.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="property error")
+        with self.assertLogs("git2svn", level="WARNING") as cm:
+            self.workspace.set_property("custom:prop", "val", "file.txt")
+            self.workspace.del_property("custom:prop", "file.txt")
+        self.assertTrue(any("Failed to set property" in msg for msg in cm.output))
+        self.assertTrue(any("Failed to delete property" in msg for msg in cm.output))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_stage_rm_not_under_version_control(self, mock_cmd):
+        """Verify stage_rm logs warning instead of raising when file is not under version control."""
+        mock_cmd.return_value = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="svn: warning: W155010: 'foo.txt' is not under version control"
+        )
+        with self.assertLogs("git2svn", level="WARNING") as cm:
+            self.workspace.stage_rm(Path("foo.txt"))
+        self.assertTrue(any("not under SVN control to remove" in msg for msg in cm.output))
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_diff_with_stat_and_target(self, mock_cmd):
+        """Verify diff forwards stat and target arguments."""
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="diff output", stderr="")
+        out = self.workspace.diff(stat=True, target="sub/file.txt")
+        self.assertEqual(out, "diff output")
+        mock_cmd.assert_called_with(["diff", "--stat", "sub/file.txt"], check=False)
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_get_status_summary_error(self, mock_cmd):
+        """Verify get_status_summary raises SvnError when svn status fails."""
+        mock_cmd.return_value = subprocess.CompletedProcess([], 1, stdout="", stderr="svn: E155004: cleanup error")
+        with self.assertRaises(git2svn.SvnError):
+            self.workspace.get_status_summary()
 
 
 if __name__ == "__main__":
