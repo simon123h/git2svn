@@ -221,6 +221,20 @@ class GitRepo:
         res = self.run_cmd(["rev-parse", "--verify", "--quiet", ref], check=False)
         return res.returncode == 0
 
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        """Check whether ancestor is reachable from descendant (i.e. ancestor is an ancestor of descendant)."""
+        res = self.run_cmd(["merge-base", "--is-ancestor", ancestor, descendant], check=False)
+        return res.returncode == 0
+
+    def get_upstream_branch(self, branch: str) -> Optional[str]:
+        """Return the upstream tracking branch name (e.g. 'origin/main'), or None if not tracking."""
+        res = self.run_cmd(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            val = res.stdout.strip()
+            if val and val != f"{branch}@{{upstream}}":
+                return val
+        return None
+
     def get_commit_parent(self, commit_hash: str) -> Optional[str]:
         """Return the parent commit hash, or None if root commit."""
         res = self.run_cmd(["rev-parse", "--verify", f"{commit_hash}^"], check=False)

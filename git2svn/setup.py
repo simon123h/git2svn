@@ -124,6 +124,7 @@ def run_setup(
             source_dir=resolved_svn,
             parent_commit=None,
             commit_message=import_msg,
+            svn_workspace=svn_ws,
         )
         # Create svn-base branch and set default branch
         git_repo.update_ref("refs/heads/svn-base", root_commit, msg="git2svn: initial import")

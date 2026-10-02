@@ -8,7 +8,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from .git import FileChange
 
@@ -373,6 +373,17 @@ class SvnWorkspace:
         elif not is_executable and has_prop:
             logger.info("SVN staging propdel svn:executable on: %s", target.as_posix())
             self.del_property("svn:executable", target)
+
+    def get_executable_files(self) -> Set[str]:
+        """Return set of relative file paths in workspace having the svn:executable property."""
+        executables: Set[str] = set()
+        res = self.run_cmd(["propget", "svn:executable", "-R"], check=False)
+        if res.returncode == 0 and res.stdout.strip():
+            for line in res.stdout.splitlines():
+                if " - *" in line:
+                    p = line.split(" - *")[0].strip()
+                    executables.add(Path(p).as_posix())
+        return executables
 
     def commit(self, message: str) -> None:
         """Run svn commit using a temporary file with -F to support arbitrary message lengths and encodings."""

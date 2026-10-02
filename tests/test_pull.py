@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from git2svn.cli import main as cli_main
 from git2svn.git import GitRepo
@@ -151,6 +151,71 @@ class TestPullUnit(unittest.TestCase):
         self.assertEqual(self.git_repo.get_config("git2svn.mode"), "standalone")
         self.assertEqual(self.git_repo.get_config("git2svn.baseBranch"), "svn-base")
         self.assertTrue(self.git_repo.ref_exists("refs/heads/svn-base"))
+
+    def test_pull_blocked_during_paused_replay(self):
+        from git2svn.state import save_replay_state
+
+        self.git_repo.set_config("git2svn.mode", "standalone")
+        self.git_repo.create_branch("svn-base", "HEAD")
+        save_replay_state(self.svn_dir, {"state": "CONFLICT_PAUSED", "current_commit": "123"})
+
+        with patch("sys.stderr"):
+            rc = run_pull(self.git_repo, self.svn_ws)
+        self.assertEqual(rc, 1)
+
+    def test_pull_blocked_when_svn_dirty(self):
+        self.git_repo.set_config("git2svn.mode", "standalone")
+        self.git_repo.create_branch("svn-base", "HEAD")
+
+        with patch.object(self.svn_ws, "is_clean", return_value=False), patch("sys.stderr"):
+            rc = run_pull(self.git_repo, self.svn_ws)
+        self.assertEqual(rc, 1)
+
+    def test_pull_blocked_when_unversioned_files(self):
+        self.git_repo.set_config("git2svn.mode", "standalone")
+        self.git_repo.create_branch("svn-base", "HEAD")
+
+        mock_status = MagicMock(return_value=MagicMock(returncode=0, stdout="?   build/output.o\n"))
+        with (
+            patch.object(self.svn_ws, "is_clean", return_value=True),
+            patch.object(self.svn_ws, "run_cmd", mock_status),
+            patch("sys.stderr"),
+        ):
+            rc = run_pull(self.git_repo, self.svn_ws)
+        self.assertEqual(rc, 1)
+
+    def test_replay_blocked_when_branch_behind_base(self):
+        from git2svn.core import Synchronizer
+
+        self.git_repo.set_config("git2svn.mode", "standalone")
+        self.git_repo.set_config("git2svn.baseBranch", "svn-base")
+
+        # Create base commit
+        (self.git_dir / "base.txt").write_text("base")
+        self.git_repo.run_cmd(["add", "."])
+        self.git_repo.run_cmd(["commit", "-m", "base commit"])
+        self.git_repo.create_branch("feature", "HEAD")
+
+        # Now advance svn-base with a new commit while feature stays behind
+        (self.git_dir / "new_remote.txt").write_text("remote")
+        self.git_repo.run_cmd(["add", "."])
+        self.git_repo.run_cmd(["commit", "-m", "remote commit"])
+        new_base_sha = self.git_repo.get_commit_hash("HEAD")
+        self.git_repo.update_ref("refs/heads/svn-base", new_base_sha)
+
+        # Checkout feature
+        self.git_repo.run_cmd(["checkout", "feature"])
+        (self.git_dir / "feat.txt").write_text("feat")
+        self.git_repo.run_cmd(["add", "."])
+        self.git_repo.run_cmd(["commit", "-m", "feat commit"])
+
+        from git2svn.patcher import Patcher
+
+        sync = Synchronizer(self.git_repo, self.svn_ws, Patcher(self.svn_ws.workspace_dir))
+        with patch.object(self.svn_ws, "is_clean", return_value=True), patch.object(self.svn_ws, "update"):
+            with self.assertRaises(RuntimeError) as ctx:
+                sync.replay("svn-base", "HEAD", assume_yes=True)
+            self.assertIn("behind or has diverged from baseline 'svn-base'", str(ctx.exception))
 
 
 @unittest.skipUnless(HAS_SVN, "Standalone E2E requires git, svn, and svnadmin")

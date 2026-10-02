@@ -301,6 +301,19 @@ class Synchronizer:
             start_ref = start_or_commit
             assert end_ref is not None
 
+            # Standalone mode guard: prevent baseline regression if active branch is behind base_branch
+            base_branch = self.git.get_config("git2svn.baseBranch") or "svn-base"
+            is_standalone = (self.git.get_config("git2svn.mode") == "standalone") or (start_ref == base_branch)
+            if is_standalone and self.git.ref_exists(f"refs/heads/{base_branch}"):
+                if not self.git.is_ancestor(f"refs/heads/{base_branch}", end_ref):
+                    raise RuntimeError(
+                        f"Target reference '{end_ref}' is behind or has diverged from baseline '{base_branch}'.\n"
+                        f"Replaying now would cause '{base_branch}' to drop newer SVN commits.\n"
+                        f"Please rebase your branch onto '{base_branch}' before replaying:\n"
+                        f"    git rebase {base_branch}\n"
+                        f"    (or run 'git2svn pull' to update and rebase automatically)"
+                    )
+
             merges = self.git.get_merge_commits(start_ref, end_ref)
             if merges:
                 raise RuntimeError(
