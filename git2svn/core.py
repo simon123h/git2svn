@@ -13,10 +13,11 @@ from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_ref_arguments
 from .patcher import Patcher
 from .state import (
+    ReplayState,
     clean_conflict_artifacts,
     clear_replay_state,
     find_conflict_artifacts,
-    load_replay_state,
+    load_replay_session,
     save_replay_state,
 )
 from .svn import SvnError, SvnWorkspace
@@ -108,109 +109,10 @@ class Synchronizer:
         Mirror the exact tree state of target_ref onto the SVN workspace without committing.
         Detects added, deleted, and modified files by comparing the Git tree against SVN files.
         """
+        from .snapshot import SnapshotSynchronizer
+
         self.show_identity_banner(f"{target_ref} (snapshot)")
-        logger.info("Starting snapshot synchronization to Git ref '%s'...", target_ref)
-
-        git_files_list = self.git.get_tree_files(target_ref)
-        git_files_set = set(git_files_list)
-        svn_files_list = self.svn.get_versioned_files()
-        svn_files_set = set(svn_files_list)
-
-        deleted_files = sorted(svn_files_set - git_files_set)
-        added_files = sorted(git_files_set - svn_files_set)
-        common_files = sorted(git_files_set & svn_files_set)
-
-        logger.info(
-            "Snapshot delta: %d added, %d deleted, %d existing files to compare",
-            len(added_files),
-            len(deleted_files),
-            len(common_files),
-        )
-
-        # 1. Handle deleted files: remove from SVN and disk
-        for rel_path in deleted_files:
-            logger.info("SVN staging snapshot delete: %s", rel_path)
-            self.svn.stage_rm(rel_path)
-            full_path = self.svn.workspace_dir / rel_path
-            if not self.dry_run and full_path.exists():
-                if full_path.is_dir():
-                    shutil.rmtree(full_path)
-                else:
-                    full_path.unlink()
-
-        # 2. Handle modified files: compare content and write if changed
-        modified_count = 0
-        for rel_path in common_files:
-            dst_path = self.svn.workspace_dir / rel_path
-            mode = self.git.get_file_mode(target_ref, rel_path)
-            content = self.git.get_file_content_bytes(target_ref, rel_path)
-
-            if mode == "120000":
-                # Symlink
-                link_target = content.decode("utf-8", errors="replace").strip()
-                needs_update = True
-                if dst_path.is_symlink() and os.readlink(dst_path) == link_target:
-                    needs_update = False
-
-                if needs_update:
-                    modified_count += 1
-                    if self.dry_run:
-                        print(f"[DRY-RUN] Update symlink {rel_path} -> {link_target}")
-                    else:
-                        dst_path.unlink(missing_ok=True)
-                        os.symlink(link_target, dst_path)
-            else:
-                # Regular file: check existing newline style & compare bytes
-                orig_eol = detect_file_eol(dst_path) if dst_path.exists() else None
-                # Normalize new content in memory to match orig_eol before comparing
-                target_bytes = content
-                if orig_eol:
-                    unified = content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-                    if orig_eol == b"\r\n":
-                        target_bytes = unified.replace(b"\n", b"\r\n")
-                    else:
-                        target_bytes = unified
-
-                current_bytes = dst_path.read_bytes() if dst_path.exists() and dst_path.is_file() else None
-                if current_bytes != target_bytes:
-                    modified_count += 1
-                    if self.dry_run:
-                        print(f"[DRY-RUN] Update file content: {rel_path}")
-                    else:
-                        dst_path.parent.mkdir(parents=True, exist_ok=True)
-                        if dst_path.exists() or dst_path.is_symlink():
-                            dst_path.unlink()
-                        dst_path.write_bytes(target_bytes)
-
-        # 3. Handle added files: extract from Git and run svn add
-        for rel_path in added_files:
-            logger.info("SVN staging snapshot add: %s", rel_path)
-            dst_path = self.svn.workspace_dir / rel_path
-            mode = self.git.get_file_mode(target_ref, rel_path)
-            content = self.git.get_file_content_bytes(target_ref, rel_path)
-
-            if self.dry_run:
-                print(f"[DRY-RUN] Extract new file {rel_path} and stage add")
-            else:
-                dst_path.parent.mkdir(parents=True, exist_ok=True)
-                if dst_path.exists() or dst_path.is_symlink():
-                    dst_path.unlink()
-
-                if mode == "120000":
-                    link_target = content.decode("utf-8", errors="replace").strip()
-                    os.symlink(link_target, dst_path)
-                else:
-                    dst_path.write_bytes(content)
-                    normalize_file_eol(dst_path)
-
-                self.svn.stage_add(rel_path)
-
-        logger.info(
-            "Snapshot staging completed: %d added, %d deleted, %d modified (uncommitted).",
-            len(added_files),
-            len(deleted_files),
-            modified_count,
-        )
+        SnapshotSynchronizer(self.git, self.svn, dry_run=self.dry_run).align_workspace(target_ref)
 
     def diff(self, stat: bool = False) -> str:
         """
@@ -310,15 +212,15 @@ class Synchronizer:
 
     def replay_continue(self) -> None:
         """Resume an interrupted replay after user resolves conflicts."""
-        state = load_replay_state(self.svn.workspace_dir)
-        if not state:
+        session = load_replay_session(self.svn.workspace_dir)
+        if not session:
             raise RuntimeError("No replay in progress. Nothing to continue.")
 
-        current_commit = state["current_commit"]
-        current_msg = state["current_commit_msg"]
-        remaining = state.get("remaining_commits", [])
-        total = state.get("total_commits", len(remaining) + 1)
-        completed = state.get("completed_commits", 0)
+        current_commit = session.current_commit
+        current_msg = session.current_commit_msg
+        remaining = session.remaining_commits
+        total = session.total_commits
+        completed = session.completed_commits
 
         # 1. Check for leftover .rej / .orig files
         rej_files = find_conflict_artifacts(self.svn.workspace_dir)
@@ -361,11 +263,11 @@ class Synchronizer:
 
     def replay_abort(self) -> None:
         """Abort in-progress replay and revert uncommitted changes."""
-        state = load_replay_state(self.svn.workspace_dir)
-        if not state:
+        session = load_replay_session(self.svn.workspace_dir)
+        if not session:
             raise RuntimeError("No replay in progress. Nothing to abort.")
 
-        current = state["current_commit"]
+        current = session.current_commit
         logger.info("Aborting replay at commit %s...", current)
         if not self.dry_run:
             self.svn.revert_all()
@@ -375,14 +277,14 @@ class Synchronizer:
 
     def replay_skip(self) -> None:
         """Skip current interrupted commit and proceed with remaining queue."""
-        state = load_replay_state(self.svn.workspace_dir)
-        if not state:
+        session = load_replay_session(self.svn.workspace_dir)
+        if not session:
             raise RuntimeError("No replay in progress. Nothing to skip.")
 
-        current = state["current_commit"]
-        remaining = state.get("remaining_commits", [])
-        total = state.get("total_commits", len(remaining) + 1)
-        completed = state.get("completed_commits", 0)
+        current = session.current_commit
+        remaining = session.remaining_commits
+        total = session.total_commits
+        completed = session.completed_commits
 
         logger.info("Skipping commit %s...", current)
         if not self.dry_run:
@@ -432,16 +334,16 @@ class Synchronizer:
                 sys.stdout.write(f"CONFLICT ({elapsed:.2f}s)\n")
                 sys.stdout.flush()
                 remaining = commits[idx - start_index + 1 :]
-                state_data = {
-                    "state": "CONFLICT_PAUSED",
-                    "git_dir": str(self.git.repo_dir),
-                    "svn_dir": str(self.svn.workspace_dir),
-                    "current_commit": commit_hash,
-                    "current_commit_msg": commit_msg,
-                    "remaining_commits": remaining,
-                    "total_commits": total_commits,
-                    "completed_commits": idx - 1,
-                }
+                state_data = ReplayState(
+                    git_dir=str(self.git.repo_dir),
+                    svn_dir=str(self.svn.workspace_dir),
+                    current_commit=commit_hash,
+                    current_commit_msg=commit_msg,
+                    remaining_commits=remaining,
+                    total_commits=total_commits,
+                    completed_commits=idx - 1,
+                    state="CONFLICT_PAUSED",
+                )
                 if not self.dry_run:
                     save_replay_state(self.svn.workspace_dir, state_data)
 

@@ -12,10 +12,13 @@ from .eol import detect_file_eol, normalize_file_eol
 from .git import FileChange, GitRepo, parse_name_status, parse_name_status_z, parse_ref_arguments
 from .patcher import Patcher
 from .setup import run_setup
+from .snapshot import SnapshotSynchronizer
 from .state import (
+    ReplayState,
     clean_conflict_artifacts,
     clear_replay_state,
     find_conflict_artifacts,
+    load_replay_session,
     load_replay_state,
     save_replay_state,
 )
@@ -56,8 +59,11 @@ __all__ = [
     "parse_name_status_z",
     "detect_file_eol",
     "normalize_file_eol",
+    "SnapshotSynchronizer",
     "save_replay_state",
     "load_replay_state",
+    "load_replay_session",
+    "ReplayState",
     "clear_replay_state",
     "find_conflict_artifacts",
     "clean_conflict_artifacts",

@@ -5,7 +5,7 @@ from typing import List
 
 from .colors import TerminalColor
 from .git import GitRepo, parse_ref_arguments
-from .state import find_conflict_artifacts, load_replay_state
+from .state import find_conflict_artifacts, load_replay_session
 from .svn import SvnError, SvnWorkspace
 
 logger = logging.getLogger("git2svn")
@@ -35,15 +35,15 @@ class StatusReporter:
         c = self.color
 
         # 1. Check in-progress replay state
-        state = load_replay_state(self.svn.workspace_dir)
-        if state:
+        session = load_replay_session(self.svn.workspace_dir)
+        if session:
             has_error = True
-            current_commit = state.get("current_commit", "unknown")
-            current_msg = state.get("current_commit_msg", "")
+            current_commit = session.current_commit or "unknown"
+            current_msg = session.current_commit_msg
             first_msg = current_msg.splitlines()[0] if current_msg else ""
-            remaining = state.get("remaining_commits", [])
-            completed = state.get("completed_commits", 0)
-            total = state.get("total_commits", len(remaining) + 1)
+            remaining = session.remaining_commits
+            completed = session.completed_commits
+            total = session.total_commits
 
             print(c.bold_red("[Replay In Progress]"))
             print(
