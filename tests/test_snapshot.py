@@ -121,10 +121,13 @@ class TestSnapshotSynchronizer(unittest.TestCase):
 
     def test_snapshot_executable_property_sync(self):
         """Verify executable property is synced for added and modified files in snapshot mode."""
+        # Ensure git stores the executable bit (core.fileMode defaults to false on Windows)
+        subprocess.run(["git", "config", "core.fileMode", "true"], cwd=self.git_path, check=True)
         script_file = self.git_path / "run.sh"
         script_file.write_text("#!/bin/sh\necho hi\n")
         script_file.chmod(0o755)
         subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "update-index", "--chmod=+x", "run.sh"], cwd=self.git_path, check=True)
         subprocess.run(["git", "commit", "-m", "add executable script"], cwd=self.git_path, check=True)
 
         with (
