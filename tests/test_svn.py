@@ -24,8 +24,8 @@ class TestSvnWorkspace(unittest.TestCase):
         self.svn.commit(msg)
         self.assertEqual(mock_run.call_count, 1)
         args, kwargs = mock_run.call_args
-        self.assertEqual(args[0][:3], [self.svn.svn_bin, "commit", "-F"])
-        msg_file = Path(args[0][3])
+        self.assertEqual(args[0][:5], [self.svn.svn_bin, "commit", "--encoding", "utf-8", "-F"])
+        msg_file = Path(args[0][5])
         self.assertEqual(kwargs["cwd"], self.workspace_dir)
         self.assertFalse(kwargs["check"])
         self.assertTrue(kwargs["capture_output"])
@@ -263,13 +263,13 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
     def test_get_recent_log_messages(self, mock_cmd):
-        """Verify get_recent_log_messages parses commit messages from svn log --xml."""
+        """Verify get_recent_log_messages parses commit messages from svn log --xml and normalizes CRLF."""
         xml_output = """<?xml version="1.0" encoding="UTF-8"?>
 <log>
 <logentry revision="42">
 <author>simon</author>
 <date>2026-10-02T00:00:00.000000Z</date>
-<msg>feat: latest commit</msg>
+<msg>feat: latest commit\r\n\r\nDetailed body with CRLF.</msg>
 </logentry>
 <logentry revision="41">
 <author>simon</author>
@@ -280,7 +280,7 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
 """
         mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout=xml_output, stderr="")
         msgs = self.workspace.get_recent_log_messages(limit=2)
-        self.assertEqual(msgs, ["feat: latest commit", "feat: earlier commit"])
+        self.assertEqual(msgs, ["feat: latest commit\n\nDetailed body with CRLF.", "feat: earlier commit"])
         mock_cmd.assert_called_with(["log", "--xml", "-l", "2"], check=False)
 
     def test_resolve_branch_url(self):

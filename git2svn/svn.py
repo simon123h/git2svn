@@ -331,12 +331,12 @@ class SvnWorkspace:
             return
 
         logger.info("Executing svn commit in %s...", self.workspace_dir)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tf:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", delete=False) as tf:
             tf.write(message)
             tf_path = Path(tf.name)
 
         try:
-            res = self.run_cmd(["commit", "-F", str(tf_path)], check=False)
+            res = self.run_cmd(["commit", "--encoding", "utf-8", "-F", str(tf_path)], check=False)
             if res.returncode != 0:
                 logger.error("Failed to 'svn commit': %s", res.stderr.strip())
                 raise parse_svn_error(res.stderr, "commit", self.workspace_dir)
@@ -404,7 +404,7 @@ class SvnWorkspace:
             for entry in root.findall("logentry"):
                 msg_elem = entry.find("msg")
                 if msg_elem is not None and msg_elem.text:
-                    messages.append(msg_elem.text)
+                    messages.append(msg_elem.text.replace("\r\n", "\n"))
                 else:
                     messages.append("")
         except Exception as e:

@@ -399,9 +399,11 @@ class Synchronizer:
         skip_count = 0
         if not force and not self.dry_run and commits:
             recent_svn_msgs = [
-                m.strip() for m in self.svn.get_recent_log_messages(limit=max(25, len(commits) * 2)) if m.strip()
+                m.replace("\r\n", "\n").strip()
+                for m in self.svn.get_recent_log_messages(limit=max(25, len(commits) * 2))
+                if m.strip()
             ]
-            git_msgs = [self.git.get_commit_message(h).strip() for h in commits]
+            git_msgs = [self.git.get_commit_message(h).replace("\r\n", "\n").strip() for h in commits]
 
             # In SVN log, messages are newest-first: [newest_svn, ..., oldest_svn].
             # In Git replay queue, commits are chronological: [c0, c1, c2, ...].

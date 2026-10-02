@@ -149,7 +149,7 @@ class TestSynchronizer(unittest.TestCase):
         self.assertEqual((self.svn_path / "single.txt").read_text(), "single content\n")
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
         self.assertIn(["add", "single.txt", "--parents"], called_args)
-        commit_calls = [arg for arg in called_args if len(arg) >= 2 and arg[0] == "commit" and arg[1] == "-F"]
+        commit_calls = [arg for arg in called_args if len(arg) >= 2 and arg[0] == "commit" and "-F" in arg]
         self.assertEqual(len(commit_calls), 1)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
@@ -184,7 +184,7 @@ class TestSynchronizer(unittest.TestCase):
 
         self.assertEqual((self.svn_path / "file.txt").read_text(), "v2\n")
         called_args = [c[0][0] for c in mock_svn_cmd.call_args_list]
-        commit_calls = [arg for arg in called_args if len(arg) >= 2 and arg[0] == "commit" and arg[1] == "-F"]
+        commit_calls = [arg for arg in called_args if len(arg) >= 2 and arg[0] == "commit" and "-F" in arg]
         self.assertEqual(len(commit_calls), 2)
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
