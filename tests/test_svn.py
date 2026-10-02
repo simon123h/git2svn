@@ -283,6 +283,82 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
         self.assertEqual(msgs, ["feat: latest commit", "feat: earlier commit"])
         mock_cmd.assert_called_with(["log", "--xml", "-l", "2"], check=False)
 
+    def test_resolve_branch_url(self):
+        """Verify resolve_branch_url converts shorthand branch names to SVN URL targets."""
+        # Standard root branch aliases
+        self.assertEqual(self.workspace.resolve_branch_url("trunk"), "^/trunk")
+        self.assertEqual(self.workspace.resolve_branch_url("main"), "^/trunk")
+        self.assertEqual(self.workspace.resolve_branch_url("master"), "^/trunk")
+
+        # Feature / custom branch shorthand
+        self.assertEqual(self.workspace.resolve_branch_url("feature-x"), "^/branches/feature-x")
+        self.assertEqual(self.workspace.resolve_branch_url("bugfix/issue-12"), "^/branches/bugfix/issue-12")
+
+        # Explicit prefixes
+        self.assertEqual(self.workspace.resolve_branch_url("branches/rel-1"), "^/branches/rel-1")
+        self.assertEqual(self.workspace.resolve_branch_url("tags/v1.0.0"), "^/tags/v1.0.0")
+
+        # Full or repository-relative URLs
+        self.assertEqual(self.workspace.resolve_branch_url("^/custom/dir"), "^/custom/dir")
+        self.assertEqual(
+            self.workspace.resolve_branch_url("https://svn.example.com/trunk"), "https://svn.example.com/trunk"
+        )
+        self.assertEqual(self.workspace.resolve_branch_url("svn://svn.example.com/repo"), "svn://svn.example.com/repo")
+
+        # Empty branch name raises ValueError
+        with self.assertRaises(ValueError):
+            self.workspace.resolve_branch_url("")
+        with self.assertRaises(ValueError):
+            self.workspace.resolve_branch_url("   ")
+
+    def test_get_current_branch_name(self):
+        """Verify get_current_branch_name extracts branch names from svn info."""
+        with patch.object(self.workspace, "get_info", return_value={"Relative URL": "^/trunk"}):
+            self.assertEqual(self.workspace.get_current_branch_name(), "trunk")
+
+        with patch.object(self.workspace, "get_info", return_value={"Relative URL": "^/branches/feature-login"}):
+            self.assertEqual(self.workspace.get_current_branch_name(), "feature-login")
+
+        with patch.object(self.workspace, "get_info", return_value={"Relative URL": "^/branches/team/feature-ui"}):
+            self.assertEqual(self.workspace.get_current_branch_name(), "team/feature-ui")
+
+        with patch.object(self.workspace, "get_info", return_value={"Relative URL": "^/tags/v1.0.0"}):
+            self.assertEqual(self.workspace.get_current_branch_name(), "tags/v1.0.0")
+
+        with patch.object(self.workspace, "get_info", return_value={"URL": "https://svn.example.com/svn/repo/trunk"}):
+            self.assertEqual(self.workspace.get_current_branch_name(), "trunk")
+
+        with patch.object(self.workspace, "get_info", return_value={}):
+            self.assertEqual(self.workspace.get_current_branch_name(), "trunk")
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_switch(self, mock_cmd):
+        """Verify switch executes svn switch or checks dirty workspace."""
+        mock_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="At revision 5.\n", stderr="")
+
+        with patch.object(self.workspace, "is_clean", return_value=True):
+            target = self.workspace.switch("feature-abc")
+            self.assertEqual(target, "^/branches/feature-abc")
+            mock_cmd.assert_called_with(["switch", "^/branches/feature-abc"], check=False)
+
+        # Dirty workspace raises RuntimeError
+        with patch.object(self.workspace, "is_clean", return_value=False):
+            with self.assertRaises(RuntimeError) as cm:
+                self.workspace.switch("trunk")
+            self.assertIn("has uncommitted changes", str(cm.exception))
+
+    @patch("builtins.print")
+    def test_switch_dry_run(self, mock_print):
+        """Verify switch in dry_run mode outputs command without running svn."""
+        dry_svn = git2svn.SvnWorkspace(self.workspace.workspace_dir, dry_run=True)
+        with patch.object(dry_svn, "is_clean", return_value=True):
+            with patch.object(dry_svn, "run_cmd") as mock_cmd:
+                target = dry_svn.switch("trunk")
+                self.assertEqual(target, "^/trunk")
+                mock_cmd.assert_not_called()
+                mock_print.assert_called_once()
+                self.assertIn("[DRY-RUN]", mock_print.call_args[0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

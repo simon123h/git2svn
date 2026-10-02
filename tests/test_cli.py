@@ -599,6 +599,66 @@ class TestCli(unittest.TestCase):
         )
         self.assertEqual(proc_allow_remote.returncode, 0)
 
+    def test_switch_cli_args(self):
+        """Verify switch subcommand parses branch argument correctly."""
+        args = git2svn.parse_cli_args(["switch", "feature-branch", "-s", "/path/to/svn"])
+        self.assertEqual(args.command, "switch")
+        self.assertEqual(args.branch, "feature-branch")
+        self.assertEqual(args.svn_dir, Path("/path/to/svn"))
+
+    def test_replay_assume_yes_flags(self):
+        """Verify -y and --yes flags set assume_yes attribute to True."""
+        args_short = git2svn.parse_cli_args(["replay", "-y", "-s", "/path/to/svn"])
+        self.assertEqual(args_short.command, "replay")
+        self.assertTrue(args_short.assume_yes)
+
+        args_long = git2svn.parse_cli_args(["replay", "--yes", "-s", "/path/to/svn"])
+        self.assertEqual(args_long.command, "replay")
+        self.assertTrue(args_long.assume_yes)
+
+    def test_switch_command_execution(self):
+        """Verify switch command delegates to Synchronizer.switch."""
+        svn_dir = self.path / "svn_wc"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+        git_dir = self.path / "git_repo"
+        git_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=git_dir, check=True, capture_output=True)
+
+        with patch("git2svn.Synchronizer.switch") as mock_switch:
+            mock_switch.return_value = "^/branches/feature-x"
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "switch", "feature-x"])
+            self.assertEqual(code, 0)
+            mock_switch.assert_called_once_with("feature-x")
+
+    def test_dynamic_default_range_resolution(self):
+        """Verify dynamic default range resolves to mirror_remote/<svn_branch>..HEAD."""
+        svn_dir = self.path / "svn_wc_dyn"
+        svn_dir.mkdir()
+        (svn_dir / ".svn").mkdir()
+        git_dir = self.path / "git_dyn"
+        git_dir.mkdir()
+        subprocess.run(["git", "init", "-b", "trunk"], cwd=git_dir, check=True, capture_output=True)
+        (git_dir / "file.txt").write_text("hello\n")
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=git_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=git_dir, check=True)
+        subprocess.run(["git", "add", "."], cwd=git_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=git_dir, check=True)
+
+        # Create dummy remote 'svn-mirror' and fake branch ref 'refs/remotes/svn-mirror/trunk'
+        head_hash = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=git_dir, capture_output=True, text=True
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "remote", "add", "svn-mirror", "https://example.com/mirror.git"], cwd=git_dir, check=True
+        )
+        subprocess.run(["git", "update-ref", "refs/remotes/svn-mirror/trunk", head_hash], cwd=git_dir, check=True)
+
+        with patch("git2svn.Synchronizer.replay") as mock_replay:
+            code = git2svn.main(["--git-dir", str(git_dir), "--svn-dir", str(svn_dir), "replay", "-y"])
+            self.assertEqual(code, 0)
+            mock_replay.assert_called_once_with("svn-mirror/trunk..HEAD", None, force=False, assume_yes=True)
+
 
 if __name__ == "__main__":
     unittest.main()

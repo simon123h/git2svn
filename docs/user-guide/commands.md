@@ -1,4 +1,4 @@
-# Command Reference: `stage`, `diff`, `replay`, `setup` & `status`
+# Command Reference: `stage`, `diff`, `replay`, `switch`, `setup`, `status` & `clean`
 
 This document details the usage, flags, and mechanics for all `git2svn` commands.
 
@@ -106,9 +106,63 @@ When working iteratively on a feature branch (e.g. replaying `main..feature`, ad
   git2svn replay main..feature --force
   ```
 
+### 2.5 Branch Mismatch Detection Guard (`-y` / `--yes`)
+To protect developers from accidentally committing Git feature branch work onto Subversion `trunk` (or vice-versa), `git2svn replay` checks whether the active Git branch aligns with the active SVN working copy branch before executing any commits.
+- Standard root names (`trunk`, `main`, and `master`) are treated as equivalent.
+- If your Git branch is `feature/user-auth` while the SVN working copy points to `trunk`, `git2svn` prints a prominent warning and asks for interactive confirmation:
+  ```text
+  [WARN]   Branch mismatch detected:
+    Git branch : feature/user-auth
+    SVN target : trunk
+
+  You are about to replay commits from Git 'feature/user-auth' into SVN 'trunk'.
+  Do you want to proceed? [y/N]: 
+  ```
+- If denied (`n` or `Enter`), replay immediately aborts without touching Subversion.
+- To bypass this prompt in automated environments or CI/CD pipelines, pass `-y` or `--yes`:
+  ```bash
+  git2svn replay -y
+  ```
+
+### 2.6 Dynamic Default Range Resolution
+When `git2svn replay` or `git2svn stage` is invoked without explicit commit references and `git2svn.defaultRange` is not set:
+1. `git2svn` detects the active SVN working copy branch name (`<svn-branch>`).
+2. It locates the configured mirror remote (`svn-mirror` or `origin`).
+3. If `<mirror-remote>/<svn-branch>` exists in Git, `git2svn` dynamically calculates the range as:
+   ```text
+   <mirror-remote>/<svn-branch>..HEAD
+   ```
+This allows running `git2svn replay` seamlessly on feature branches without needing to reconfigure `git2svn.defaultRange`.
+
 ---
 
-## 3. Conflict Resolution Lifecycle
+## 3. Command: `switch`
+
+Switches the active Subversion working copy to another branch (e.g. `^/trunk` or `^/branches/<name>`).
+
+```bash
+# Switch to SVN trunk (^/trunk):
+git2svn switch trunk
+
+# Switch to a feature or maintenance branch (^/branches/release-2.0):
+git2svn switch release-2.0
+
+# Switch using explicit SVN branch or tag paths:
+git2svn switch branches/team-feature
+git2svn switch tags/v1.0.0
+```
+
+### Features:
+- **Clean Workspace Verification:** Ensures the SVN working copy has no uncommitted changes before switching (run `git2svn clean` or `git2svn status` first).
+- **Shorthand Normalization:**
+  - `trunk`, `main`, and `master` automatically resolve to `^/trunk`.
+  - Feature names like `auth-fix` resolve to `^/branches/auth-fix`.
+  - Full URLs (`https://`, `svn://`, `^/...`) are preserved verbatim.
+- **Dry-run Support:** Test switch targets with `git2svn switch <name> -n`.
+
+---
+
+## 4. Conflict Resolution Lifecycle
 
 When a patch conflict occurs during a multi-commit `replay`:
 
@@ -161,7 +215,7 @@ flowchart TD
 
 ---
 
-## 4. Command: `setup`
+## 5. Command: `setup`
 
 Automates initial repository configuration for a fresh clone or existing repository. Accepts either a local working copy path or an SVN repository URL:
 
@@ -198,7 +252,7 @@ git2svn setup /path/to/svn
 
 ---
 
-## 5. Command: `status`
+## 6. Command: `status`
 
 Inspects synchronization health, pending commits in `git2svn.defaultRange`, and working tree states across both Git and Subversion.
 
@@ -218,7 +272,7 @@ git2svn status
 
 ---
 
-## 6. Command: `clean`
+## 7. Command: `clean`
 
 Resets the SVN workspace to a clean, unlocked state by reverting uncommitted changes, removing untracked conflict artifacts (`.rej` / `.orig`), deleting unversioned files/directories, and releasing SVN locks.
 
@@ -240,7 +294,7 @@ git2svn clean --purge
 
 ---
 
-## 7. Structural Staging Mechanics
+## 8. Structural Staging Mechanics
 
 During patch application or file copying, `git2svn` maps Git status codes (`git diff --name-status`) to the corresponding Subversion commands:
 

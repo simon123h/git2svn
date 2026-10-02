@@ -447,6 +447,7 @@ class TestSynchronizer(unittest.TestCase):
                 "--svn-dir",
                 str(self.svn_path),
                 "replay",
+                "-y",
             ]
         )
         self.assertEqual(code, 0)
@@ -854,6 +855,78 @@ class TestSynchronizer(unittest.TestCase):
                 self.sync_mgr.replay(base_hash, c2_hash, force=False)
                 mock_stage.assert_called_once_with(c2_hash)
                 mock_commit.assert_called_once_with("style: formatted")
+
+    def test_branch_alignment_prompt_confirm_yes(self):
+        """Verify user confirming 'y' on branch mismatch proceeds with replay."""
+        with (
+            patch.object(self.git_repo, "get_current_branch", return_value="feature-login"),
+            patch.object(self.svn_ws, "get_current_branch_name", return_value="trunk"),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            # Should not raise
+            self.sync_mgr._check_branch_alignment()
+
+    def test_branch_alignment_prompt_abort_no(self):
+        """Verify user denying 'n' on branch mismatch aborts replay with RuntimeError."""
+        with (
+            patch.object(self.git_repo, "get_current_branch", return_value="feature-login"),
+            patch.object(self.svn_ws, "get_current_branch_name", return_value="trunk"),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="n"),
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                self.sync_mgr._check_branch_alignment()
+            self.assertIn("Replay aborted: branch mismatch.", str(cm.exception))
+
+    def test_branch_alignment_bypasses(self):
+        """Verify assume_yes and force bypass branch mismatch prompt."""
+        with (
+            patch.object(self.git_repo, "get_current_branch", return_value="feature-login"),
+            patch.object(self.svn_ws, "get_current_branch_name", return_value="trunk"),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input") as mock_input,
+        ):
+            self.sync_mgr._check_branch_alignment(assume_yes=True)
+            mock_input.assert_not_called()
+
+            self.sync_mgr._check_branch_alignment(force=True)
+            mock_input.assert_not_called()
+
+    def test_branch_alignment_matching_roots(self):
+        """Verify main/master/trunk equivalencies do not prompt."""
+        for git_name in ["main", "master", "trunk"]:
+            with (
+                patch.object(self.git_repo, "get_current_branch", return_value=git_name),
+                patch.object(self.svn_ws, "get_current_branch_name", return_value="trunk"),
+                patch("sys.stdin.isatty", return_value=True),
+                patch("builtins.input") as mock_input,
+            ):
+                self.sync_mgr._check_branch_alignment()
+                mock_input.assert_not_called()
+
+    def test_branch_alignment_non_interactive(self):
+        """Verify branch mismatch in non-interactive environment (e.g. CI) logs warning without prompting."""
+        with (
+            patch.object(self.git_repo, "get_current_branch", return_value="feature-ci"),
+            patch.object(self.svn_ws, "get_current_branch_name", return_value="trunk"),
+            patch("sys.stdin.isatty", return_value=False),
+            patch("builtins.input") as mock_input,
+        ):
+            self.sync_mgr._check_branch_alignment()
+            mock_input.assert_not_called()
+
+    def test_synchronizer_switch(self):
+        """Verify Synchronizer.switch delegates to SvnWorkspace.switch and prints status."""
+        with (
+            patch.object(self.svn_ws, "switch", return_value="^/branches/v2.0") as mock_switch,
+            patch.object(self.svn_ws, "get_current_branch_name", return_value="v2.0"),
+            patch("builtins.print") as mock_print,
+        ):
+            target = self.sync_mgr.switch("v2.0")
+            self.assertEqual(target, "^/branches/v2.0")
+            mock_switch.assert_called_once_with("v2.0")
+            mock_print.assert_called_once_with("Switched SVN working copy to: v2.0 (^/branches/v2.0)")
 
 
 if __name__ == "__main__":

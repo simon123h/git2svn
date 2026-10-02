@@ -209,6 +209,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Bypass duplicate commit check (apply commits even if their messages match recent SVN log entries)",
     )
+    parser_replay.add_argument(
+        "-y",
+        "--yes",
+        dest="assume_yes",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Automatically confirm prompt if Git branch and SVN working copy branch differ",
+    )
+
+    # switch
+    parser_switch = subparsers.add_parser(
+        "switch",
+        parents=[common_parser],
+        help="Switch SVN working copy to a different branch (e.g. 'trunk' or 'release-1.0')",
+        description=(
+            "Switch the Subversion working copy to another branch URL.\n"
+            "'trunk', 'main', and 'master' switch to ^/trunk.\n"
+            "Any other branch name switches to ^/branches/<name>."
+        ),
+    )
+    parser_switch.add_argument(
+        "branch",
+        type=str,
+        help="Target SVN branch (e.g. 'trunk', 'release-2.0', or 'branches/feature-x')",
+    )
 
     # setup
     parser_setup = subparsers.add_parser(
@@ -409,7 +434,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         color_mode=color_mode,
     )
 
-    # Fallback to git2svn.defaultRange if ref1 is omitted
+    # Fallback to git2svn.defaultRange or dynamic <mirror>/<svn_branch>..HEAD if ref1 is omitted
     ref1 = getattr(args, "ref1", None)
     ref2 = getattr(args, "ref2", None)
     if not ref1 and args.command in ("stage", "replay"):
@@ -422,6 +447,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ref1 = default_range
                 ref2 = None
                 logger.info("Using configured default range from git2svn.defaultRange: '%s'", default_range)
+            else:
+                # Dynamic fallback: resolve SVN working copy branch and match against remotes
+                svn_branch = svn_workspace.get_current_branch_name()
+                remotes = git_repo.get_remotes()
+                mirror_remote = "svn-mirror" if "svn-mirror" in remotes else ("origin" if "origin" in remotes else None)
+                if mirror_remote:
+                    remote_ref = f"{mirror_remote}/{svn_branch}"
+                    # Check if remote ref exists in git repo
+                    if git_repo.ref_exists(remote_ref):
+                        ref1 = f"{remote_ref}..HEAD"
+                        logger.info("Using dynamic default range based on SVN target: '%s'", ref1)
 
     try:
         if args.command == "stage":
@@ -474,7 +510,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                     return 1
                 force = getattr(args, "force", False)
-                sync_mgr.replay(ref1, ref2, force=force)
+                assume_yes = getattr(args, "assume_yes", False)
+                sync_mgr.replay(ref1, ref2, force=force, assume_yes=assume_yes)
+        elif args.command == "switch":
+            sync_mgr.switch(args.branch)
+            return 0
         elif args.command == "status":
             return sync_mgr.status()
         elif args.command == "clean":

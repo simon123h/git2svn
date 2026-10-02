@@ -410,3 +410,85 @@ class SvnWorkspace:
         except Exception as e:
             logger.debug("Failed to parse svn log --xml output: %s", e)
         return messages
+
+    def get_current_branch_name(self) -> str:
+        """
+        Determine the short name of the branch currently checked out in the SVN working copy.
+        Returns 'trunk' if at trunk root, or the sub-directory name under 'branches/' or 'tags/'.
+        """
+        info = self.get_info()
+        rel_url = info.get("Relative URL") or ""
+        url = info.get("URL") or ""
+
+        target = rel_url.lstrip("^/") if rel_url else url
+        if not target:
+            return "trunk"
+
+        # Check standard Subversion directory layouts
+        parts = [p for p in target.split("/") if p]
+        if "trunk" in parts:
+            return "trunk"
+        if "branches" in parts:
+            idx = parts.index("branches")
+            if idx + 1 < len(parts):
+                return "/".join(parts[idx + 1 :])
+        if "tags" in parts:
+            idx = parts.index("tags")
+            if idx + 1 < len(parts):
+                return f"tags/{'/'.join(parts[idx + 1 :])}"
+
+        # Fallback to the last path segment
+        return parts[-1] if parts else "trunk"
+
+    def resolve_branch_url(self, branch_name: str) -> str:
+        """
+        Convert a branch name or path into a full Subversion target URL or repository-relative URL (^/...).
+        Conventions:
+        - 'trunk' / 'main' / 'master' -> '^/trunk'
+        - 'branches/<name>' or 'tags/<name>' -> '^/<branch_name>'
+        - full URL (http://, svn://, ^/...) -> unchanged
+        - '<name>' -> '^/branches/<name>'
+        """
+        name = branch_name.strip()
+        if not name:
+            raise ValueError("Branch name cannot be empty.")
+
+        if name.startswith(("^/", "http://", "https://", "svn://", "svn+ssh://", "file://")):
+            return name
+
+        norm = name.lower()
+        if norm in ("trunk", "main", "master"):
+            return "^/trunk"
+
+        if name.startswith(("branches/", "tags/")):
+            return f"^/{name}"
+
+        return f"^/branches/{name}"
+
+    def switch(self, target_branch: str) -> str:
+        """
+        Switch the SVN working copy to target_branch.
+        Returns the resolved switch target URL.
+        """
+        if not self.is_clean():
+            raise RuntimeError(
+                f"Subversion working copy at '{self.workspace_dir}' has uncommitted changes. "
+                "Please commit, stash, or revert changes before switching branches ('git2svn clean')."
+            )
+
+        resolved_target = self.resolve_branch_url(target_branch)
+        logger.info("Switching SVN working copy in %s to %s...", self.workspace_dir, resolved_target)
+
+        if self.dry_run:
+            print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} switch {resolved_target}")
+            return resolved_target
+
+        res = self.run_cmd(["switch", resolved_target], check=False)
+        if res.returncode != 0:
+            logger.error("Failed to 'svn switch': %s", res.stderr.strip())
+            raise parse_svn_error(res.stderr, f"switch to '{resolved_target}'", self.workspace_dir)
+
+        if res.stdout:
+            logger.info("SVN switch output:\n%s", res.stdout.strip())
+
+        return resolved_target

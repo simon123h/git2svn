@@ -161,6 +161,34 @@ This document contains the Architecture Decision Records (ADRs) for `git2svn`.
   - **Decoupled from Upstream Mirror Latency:** Developers do not need to wait for `svn2git` or CI sync jobs to complete before continuing work and replaying new commits.
   - **Zero Database State Needed:** Relies on Subversion's actual repository log as the authoritative source of truth, avoiding local metadata tracking corruption or commit hash trailer desynchronization after CRLF conversion.
 
+---
+
+### ADR-17: SVN Target Branch Awareness, Working Copy Switching, and Mismatch Guard
+* **Context:** In enterprise environments where Subversion hosts multiple branches (e.g. `^/trunk`, `^/branches/feature-x`, `^/branches/release-1.0`), users working in Git across different local branches need to commit their work to the corresponding branch in SVN. Without branch awareness:
+  1. Users must manually manage Subversion working copies or run raw `svn switch` commands against internal URLs.
+  2. If a developer is currently on Git branch `feature-b` while the SVN working copy is switched to `trunk`, running `git2svn replay` would accidentally commit feature branch code directly into Subversion trunk.
+  3. Hardcoding a static default range like `origin/trunk..trunk` fails when working on feature branches.
+* **Decision:** Introduce first-class **SVN Target Branch Awareness**:
+  1. **Working Copy Switching (`git2svn switch <branch>`):**
+     - Accepts shorthand names: `trunk`, `main`, and `master` resolve to `^/trunk`.
+     - Custom names (`feature-a`, `bugfix/issue-1`) resolve to `^/branches/<name>`.
+     - Explicit repository-relative paths (`^/...`) or full URLs are preserved.
+     - Validates that the working copy has no uncommitted changes before switching.
+  2. **Branch Mismatch Detection Guard:**
+     - Before replaying, `git2svn` compares the active Git branch (`git rev-parse --abbrev-ref HEAD`) against the SVN working copy branch.
+     - Normalizes standard root aliases (`trunk`, `main`, and `master`) as equivalent.
+     - If the Git branch and SVN branch differ, `git2svn` displays a prominent warning badge and prompts for interactive confirmation (`Do you want to proceed? [y/N]: `), aborting if denied.
+     - Provides `-y` / `--yes` / `--force` flags to bypass the prompt in automated/scripted workflows. In non-interactive environments (`sys.stdin.isatty() == False`), logs a warning and proceeds.
+  3. **Dynamic Default Range Fallback:**
+     - When no range is supplied and `git2svn.defaultRange` is not configured, `git2svn` queries the active SVN working copy branch name (`<svn-branch>`).
+     - Detects the mirror remote (`svn-mirror` or `origin`) and verifies whether `<mirror>/<svn-branch>` exists.
+     - If found, dynamically calculates the replay range as `<mirror>/<svn-branch>..HEAD`.
+* **Consequences:**
+  - **Accident Prevention:** Guards against accidental commits of Git feature branches into SVN trunk or vice-versa.
+  - **Frictionless Branching:** Developers switch their SVN target branch with a single command without memorizing repository URLs.
+  - **Smart Defaults:** `git2svn replay` "just works" on feature branches matching upstream SVN tracking branches without manual range specification.
+
+
 
 
 

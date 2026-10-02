@@ -293,6 +293,13 @@ class GitRepo:
             return [line.strip() for line in res.stdout.splitlines() if line.strip()]
         return []
 
+    def get_remotes(self) -> List[str]:
+        """Return list of configured remote names (e.g. ['origin', 'svn-mirror'])."""
+        res = self.run_cmd(["remote"], check=False)
+        if res.returncode == 0:
+            return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        return []
+
     def get_remote_branches(self) -> List[str]:
         """Return list of remote branch names (e.g. 'origin/trunk', 'svn-mirror/trunk')."""
         res = self.run_cmd(["for-each-ref", "--format=%(refname:short)", "refs/remotes/"], check=False)

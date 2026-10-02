@@ -171,7 +171,74 @@ class Synchronizer:
             shutil.rmtree(self.svn.workspace_dir, ignore_errors=True)
             logger.info("SVN workspace purged.")
 
-    def replay(self, ref1: str, ref2: Optional[str] = None, force: bool = False) -> None:
+    def switch(self, target_branch: str) -> str:
+        """
+        Switch the SVN working copy to target_branch (e.g. 'trunk' or 'release-1.0').
+        """
+        target_url = self.svn.switch(target_branch)
+        branch_name = self.svn.get_current_branch_name()
+        print(f"Switched SVN working copy to: {branch_name} ({target_url})")
+        return target_url
+
+    def _check_branch_alignment(self, force: bool = False, assume_yes: bool = False) -> None:
+        """
+        Check if the current Git branch matches the active SVN working copy branch.
+        Warns or prompts for confirmation if they differ.
+        """
+        git_branch = self.git.get_current_branch()
+        svn_branch = self.svn.get_current_branch_name()
+
+        if not git_branch or git_branch in ("unknown", "HEAD (detached)"):
+            return
+        if not svn_branch or svn_branch == "unknown":
+            return
+
+        # Equivalence normalization: trunk, main, master are treated as equivalent standard roots
+        def normalize_name(name: str) -> str:
+            lower = name.lower()
+            if lower in ("trunk", "main", "master"):
+                return "trunk"
+            if lower.startswith("branches/"):
+                return lower.split("/", 1)[1]
+            return lower
+
+        git_norm = normalize_name(git_branch)
+        svn_norm = normalize_name(svn_branch)
+
+        if git_norm != svn_norm and not force and not assume_yes:
+            warn_badge = self.color.warn_badge("[WARN]  ")
+            print(
+                f"\n{warn_badge} Branch mismatch detected:\n"
+                f"  Git branch : {self.color.bold(git_branch)}\n"
+                f"  SVN target : {self.color.bold(svn_branch)}\n\n"
+                f"You are about to replay commits from Git '{git_branch}' into SVN '{svn_branch}'.",
+                file=sys.stderr,
+            )
+
+            # Interactive confirmation prompt
+            if sys.stdin.isatty():
+                try:
+                    resp = input("Do you want to proceed? [y/N]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nAborted by user.", file=sys.stderr)
+                    raise RuntimeError("Replay aborted: branch mismatch.") from None
+                if resp not in ("y", "yes"):
+                    print("Aborted by user.", file=sys.stderr)
+                    raise RuntimeError("Replay aborted: branch mismatch.")
+            else:
+                logger.warning(
+                    "Branch mismatch (Git '%s' vs SVN '%s') detected in non-interactive mode. Proceeding.",
+                    git_branch,
+                    svn_branch,
+                )
+
+    def replay(
+        self,
+        ref1: str,
+        ref2: Optional[str] = None,
+        force: bool = False,
+        assume_yes: bool = False,
+    ) -> None:
         """
         Replay a single commit or range of commits onto SVN, committing each with its Git message.
         If force=False, commits already present in recent SVN logs are automatically skipped.
@@ -184,6 +251,8 @@ class Synchronizer:
             raise RuntimeError(
                 "SVN workspace has uncommitted changes. Please commit, stash, or revert them before starting a replay."
             )
+
+        self._check_branch_alignment(force=force, assume_yes=assume_yes)
 
         if not self.dry_run:
             self.svn.update()
