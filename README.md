@@ -1,4 +1,4 @@
-# Git-to-SVN Synchronization CLI (`git2svn`)
+# `git2svn`: Git-to-SVN Synchronization CLI
 
 <p align="center">
   <a href="https://github.com/simon123h/git2svn/actions/workflows/ci.yml"><img src="https://github.com/simon123h/git2svn/actions/workflows/ci.yml/badge.svg?branch=main" alt="Build Status"></a>
@@ -21,12 +21,14 @@ A lightweight, zero-dependency Python 3 CLI utility to bridge local Git developm
 > `git2svn` is designed for teams whose authoritative central repository is Subversion, but whose developers prefer the agility, local branching, rebasing, and tooling of Git.
 
 ### ✅ What `git2svn` is designed for:
+
 - **Complementing an existing `svn2git` mirror:** You have an automated or incremental SVN-to-Git mirror (e.g. via `all-fast-export`, `subgit`, or an internal sync job) pulling SVN revisions into a tracking branch (such as `origin/svn-mirror/trunk` or `mirror/trunk`). `git2svn` serves as the **reverse gateway**, letting you replay your local feature branches cleanly back into SVN.
 - **Local Git freedom with an SVN backend:** Work locally with Git branches, stashes, and interactive rebases, then ship clean changesets to SVN with zero manual copy-pasting.
 - **Safe, staged inspection (`stage`):** Reviewing complex diffs or running pre-commit checks in TortoiseSVN before changes touch the SVN server.
 - **Sequential commit porting (`replay`):** Porting multi-commit PRs into SVN with original commit messages and conflict pause-and-resume control.
 
 ### ❌ What `git2svn` is NOT designed for:
+
 - **It is NOT an autonomous full-mirror / bidirectional replication tool:** `git2svn` does not automatically track arbitrary Git tags, merge trees, or multi-branch mappings across repositories. Git history should be strictly linear before replaying to SVN.
 - **It is NOT intended for Git-as-master workflows:** If Git is your authoritative source of truth and you merely want to mirror everything into a passive SVN replica without human interaction, use a dedicated continuous migration daemon like SubGit.
 
@@ -111,7 +113,7 @@ git svn-pull     # Pull fresh SVN mirror commits & rebase local trunk
 git svn-status   # Run git2svn status
 ```
 
-*(Note: Advanced users or CI/CD scripts can still pass `--svn-dir <path>` or `--svn-url <url>` to override the configured workspace on any command).*
+_(Note: Advanced users or CI/CD scripts can still pass `--svn-dir <path>` or `--svn-url <url>` to override the configured workspace on any command)._
 
 ---
 
@@ -122,19 +124,19 @@ flowchart LR
     subgraph Local["Developer Workstation"]
         direction LR
         Git[("Git Workspace<br/>(feature branch)")]
-        
+
         Tool["git2svn Engine<br/>• Diff & Patch<br/>• EOL Normalizer<br/>• Conflict Recovery"]
-        
+
         SVN[("SVN Working Copy<br/>(trunk / branch)")]
     end
 
     Remote[("Remote SVN Server<br/>(Central Repository)")]
 
     Git -->|"Reads commits & diffs"| Tool
-    
+
     Tool -->|"stage: patch & stage (uncommitted)"| SVN
     Tool -->|"replay: patch & commit each revision"| SVN
-    
+
     SVN -->|"Manual commit (after stage review)"| Remote
     SVN -->|"Atomic svn commit (during replay)"| Remote
 ```
@@ -166,7 +168,6 @@ ruff format .
 git config core.hooksPath .githooks
 # or use pre-commit framework: pre-commit install
 ```
-
 
 ---
 
