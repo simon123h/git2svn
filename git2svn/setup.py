@@ -25,11 +25,11 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     if not raw_target:
         # Check existing config or environment variable
         cfg_url = git_repo.get_config("git2svn.svnUrl")
-        cfg_svn = git_repo.get_config("git2svn.svnDir")
+        cfg_svn = git_repo.get_svn_dir_config()
         if cfg_url:
             raw_target = cfg_url
         elif cfg_svn:
-            raw_target = cfg_svn
+            raw_target = str(cfg_svn)
         elif "SVN_URL" in os.environ:
             raw_target = os.environ["SVN_URL"].strip()
         elif "SVN_DIR" in os.environ:
@@ -138,8 +138,8 @@ def run_setup(git_repo: GitRepo, svn_target: Optional[Path | str]) -> int:
     else:
         mirror_remote = "svn-mirror"
 
-    # SVN directory path (use forward slashes for cross-platform consistency in git config)
-    svn_dir_str = str(resolved_svn).replace("\\", "/")
+    # Store the SVN directory relative to the repo so the project folder can be moved
+    svn_dir_str = git_repo.format_svn_dir(resolved_svn)
     git_repo.set_config("git2svn.svnDir", svn_dir_str)
     if configured_url:
         git_repo.set_config("git2svn.svnUrl", configured_url)

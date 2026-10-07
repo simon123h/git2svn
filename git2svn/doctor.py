@@ -215,9 +215,7 @@ class Doctor:
         if not svn_dir and "SVN_DIR" in os.environ:
             svn_dir = Path(os.environ["SVN_DIR"])
         if not svn_dir and self.git.is_valid_repo():
-            cfg_dir = self.git.get_config("git2svn.svnDir")
-            if cfg_dir:
-                svn_dir = Path(cfg_dir)
+            svn_dir = self.git.get_svn_dir_config()
 
         svn_url = self.raw_svn_url
         if not svn_url and "SVN_URL" in os.environ:

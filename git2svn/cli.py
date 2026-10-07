@@ -601,9 +601,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 1. SVN workspace directory resolution: CLI arg -> $SVN_DIR -> git config -> replay cwd
     svn_dir = args.svn_dir or (Path(os.environ["SVN_DIR"]) if "SVN_DIR" in os.environ else None)
     if not svn_dir:
-        config_svn = git_repo.get_config("git2svn.svnDir")
-        if config_svn:
-            svn_dir = Path(config_svn)
+        svn_dir = git_repo.get_svn_dir_config()
 
     # 2. SVN URL resolution: CLI arg -> $SVN_URL -> git config
     svn_url = getattr(args, "svn_url", None) or (os.environ.get("SVN_URL") if "SVN_URL" in os.environ else None)

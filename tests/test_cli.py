@@ -1,4 +1,5 @@
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -118,7 +119,8 @@ class TestCli(unittest.TestCase):
         self.assertEqual(res, 0)
 
         git_repo = git2svn.GitRepo(git_dir)
-        self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(svn_dir).replace("\\", "/"))
+        self.assertEqual(git_repo.get_config("git2svn.svnDir"), os.path.relpath(svn_dir, git_dir).replace("\\", "/"))
+        self.assertEqual(git_repo.get_svn_dir_config(), svn_dir)
         self.assertEqual(git_repo.get_config("git2svn.mirrorRemote"), "svn-mirror")
         self.assertIsNone(git_repo.get_config("git2svn.defaultRange"))
         self.assertIsNone(git_repo.get_config("git2svn.autoUpdate"))
@@ -141,7 +143,10 @@ class TestCli(unittest.TestCase):
             res = git2svn.main(["--git-dir", str(git_dir), "setup"])
             self.assertEqual(res, 0)
             git_repo = git2svn.GitRepo(git_dir)
-            self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(svn_dir).replace("\\", "/"))
+            self.assertEqual(
+                git_repo.get_config("git2svn.svnDir"), os.path.relpath(svn_dir, git_dir).replace("\\", "/")
+            )
+            self.assertEqual(git_repo.get_svn_dir_config(), svn_dir)
 
     def test_setup_missing_svn_dir_error(self):
         """Verify setup fails with exit code 1 when no svn_dir is provided and non-interactive."""
@@ -230,7 +235,8 @@ class TestCli(unittest.TestCase):
 
             git_repo = git2svn.GitRepo(git_dir)
             self.assertEqual(git_repo.get_config("git2svn.svnUrl"), "https://svn.example.com/trunk")
-            self.assertEqual(git_repo.get_config("git2svn.svnDir"), str(managed_dir).replace("\\", "/"))
+            self.assertEqual(git_repo.get_config("git2svn.svnDir"), ".git/git2svn/svn_wc")
+            self.assertEqual(git_repo.get_svn_dir_config(), managed_dir)
 
     def test_setup_with_svn_url_checkout_error(self):
         """Verify setup fails cleanly if checkout raises SvnError."""

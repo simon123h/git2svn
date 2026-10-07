@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -291,6 +292,25 @@ class GitRepo:
     def set_config(self, key: str, value: str) -> None:
         """Set a repository-level configuration value via git config <key> <value>."""
         self.run_cmd(["config", key, value], check=True)
+
+    def format_svn_dir(self, svn_dir: Path) -> str:
+        """Return svn_dir as a repo-relative path (forward slashes) for storing in git config.
+
+        Falls back to the absolute path if no relative path exists (e.g. different Windows drive).
+        """
+        try:
+            rel = os.path.relpath(svn_dir.resolve(), self.repo_dir)
+        except ValueError:
+            rel = str(svn_dir.resolve())
+        return rel.replace("\\", "/")
+
+    def get_svn_dir_config(self) -> Optional[Path]:
+        """Read git2svn.svnDir, resolving relative values against the repository root."""
+        value = self.get_config("git2svn.svnDir")
+        if not value:
+            return None
+        path = Path(value)
+        return path if path.is_absolute() else (self.repo_dir / path).resolve()
 
     def get_local_branches(self) -> List[str]:
         """Return list of local branch names."""

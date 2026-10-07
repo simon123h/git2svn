@@ -279,7 +279,7 @@ git2svn setup /path/to/svn
    - If an **SVN URL** (`https://`, `svn://`, `file://`, etc.) or repository store is given:
      - Sets up a managed internal working copy in `.git/git2svn/svn_wc/`.
      - Automatically runs `svn checkout <url> .git/git2svn/svn_wc/`.
-     - Sets `git config git2svn.svnUrl <url>` and `git config git2svn.svnDir <managed_dir>`.
+     - Sets `git config git2svn.svnUrl <url>` and `git config git2svn.svnDir .git/git2svn/svn_wc` (stored relative to the repository root, so the project folder can be moved).
      - Future commands (`stage`, `replay`, `diff`, `status`) work seamlessly without needing `--svn-dir`!
    - If a **local working copy path** is given:
      - Validates that the path contains a `.svn` directory.
