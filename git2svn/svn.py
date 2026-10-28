@@ -8,7 +8,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from .git import FileChange
 
@@ -394,8 +394,45 @@ class SvnWorkspace:
             return res.stdout.strip()
         return None
 
-    def sync_file_executable_property(self, path: Path | str, is_executable: bool) -> None:
-        """Synchronize the svn:executable property on path with the given boolean flag."""
+    def get_executable_files(self) -> Optional[Set[Path]]:
+        """
+        Return the set of versioned paths that currently have svn:executable, using one 'svn proplist' call.
+        Returns None if it cannot be determined (dry-run, svn failure, unparsable output); callers then
+        fall back to a per-file 'svn propget'.
+        """
+        if self.dry_run:
+            return None
+        res = self.run_cmd(["proplist", "-R", "--xml"], check=False)
+        if res.returncode != 0:
+            return None
+        try:
+            props_root = ET.fromstring(res.stdout)
+        except ET.ParseError as e:
+            logger.debug("Failed to parse svn proplist --xml output: %s", e)
+            return None
+
+        executable: Set[Path] = set()
+        for target in props_root.iter("target"):
+            target_str = target.get("path")
+            if not target_str or not any(p.get("name") == "svn:executable" for p in target.iter("property")):
+                continue
+            target_path = Path(target_str)
+            if target_path.is_absolute():
+                try:
+                    target_path = target_path.relative_to(self.workspace_dir)
+                except ValueError:
+                    continue
+            executable.add(target_path)
+        return executable
+
+    def sync_file_executable_property(
+        self, path: Path | str, is_executable: bool, currently_executable: Optional[bool] = None
+    ) -> None:
+        """
+        Synchronize the svn:executable property on path with the given boolean flag.
+        If the caller already knows the current state (see get_executable_files), pass it as
+        currently_executable to avoid a per-file 'svn propget'.
+        """
         target = Path(path)
         if self.dry_run:
             action = (
@@ -406,7 +443,9 @@ class SvnWorkspace:
             print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} {action}")
             return
 
-        has_prop = self.get_property("svn:executable", target) is not None
+        if currently_executable is None:
+            currently_executable = self.get_property("svn:executable", target) is not None
+        has_prop = currently_executable
         if is_executable and not has_prop:
             logger.info("SVN staging propset svn:executable on: %s", target.as_posix())
             self.set_property("svn:executable", "*", target)

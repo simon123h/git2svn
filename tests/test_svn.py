@@ -574,3 +574,30 @@ class TestAtSignFileNamesRealSvn(unittest.TestCase):
             ws.stage_rm(name)
 
             self.assertEqual(ws.get_status_summary(), ["D       icon@2x.png"])
+
+
+@unittest.skipUnless(shutil.which("svn") and shutil.which("svnadmin"), "requires 'svn' and 'svnadmin' in PATH")
+class TestGetExecutableFilesRealSvn(unittest.TestCase):
+    def test_lists_only_executable_files_including_odd_names(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            repo, wc = root / "repo", root / "wc"
+            subprocess.run(["svnadmin", "create", str(repo)], check=True, capture_output=True)
+            git2svn.svn.checkout_working_copy(repo, wc)
+            (wc / "my dir").mkdir()
+            names = [Path("my dir/run me.sh"), Path("icon@2x.sh"), Path("plain.txt"), Path("other.txt")]
+            ws = git2svn.SvnWorkspace(wc)
+            for n in names:
+                (wc / n).write_text("x")
+                ws.stage_add(n)
+            ws.sync_file_executable_property(names[0], is_executable=True)
+            ws.sync_file_executable_property(names[1], is_executable=True)
+            ws.set_property("svn:keywords", "Id", names[2])  # other property must not count
+            ws.set_property("svn:ignore", "*.o", Path("my dir"))  # directory property must not count
+
+            self.assertEqual(ws.get_executable_files(), {names[0], names[1]})
+
+    def test_dry_run_and_failure_return_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(git2svn.SvnWorkspace(Path(d), dry_run=True).get_executable_files())
+            self.assertIsNone(git2svn.SvnWorkspace(Path(d)).get_executable_files())  # not a working copy

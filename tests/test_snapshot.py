@@ -136,7 +136,37 @@ class TestSnapshotSynchronizer(unittest.TestCase):
             patch.object(self.svn_ws, "sync_file_executable_property") as mock_sync_prop,
         ):
             self.synchronizer.align_workspace("HEAD")
-            mock_sync_prop.assert_called_with(Path("run.sh"), is_executable=True)
+            # proplist unavailable on this fake working copy -> falls back to per-file propget (None)
+            mock_sync_prop.assert_called_with(Path("run.sh"), is_executable=True, currently_executable=None)
+
+    def test_snapshot_uses_batched_executable_lookup(self):
+        """Known executable state from one proplist call is passed through, avoiding per-file propget."""
+        for name, mode in (("run.sh", 0o755), ("data.txt", 0o644), ("tool.sh", 0o755)):
+            f = self.git_path / name
+            f.write_text("x\n")
+            f.chmod(mode)
+        subprocess.run(["git", "config", "core.fileMode", "true"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "update-index", "--chmod=+x", "run.sh", "tool.sh"], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "files"], cwd=self.git_path, check=True)
+        for name in ("run.sh", "data.txt", "tool.sh"):
+            (self.svn_path / name).write_text("x\n")
+
+        with (
+            patch.object(self.svn_ws, "stage_add"),
+            patch.object(
+                self.svn_ws, "get_versioned_files", return_value=[Path(n) for n in ("run.sh", "data.txt", "tool.sh")]
+            ),
+            patch.object(self.svn_ws, "get_executable_files", return_value={Path("run.sh"), Path("data.txt")}),
+            patch.object(self.svn_ws, "get_property") as mock_propget,
+            patch.object(self.svn_ws, "set_property") as mock_set,
+            patch.object(self.svn_ws, "del_property") as mock_del,
+        ):
+            self.synchronizer.align_workspace("HEAD")
+
+        mock_propget.assert_not_called()
+        mock_set.assert_called_once_with("svn:executable", "*", Path("tool.sh"))
+        mock_del.assert_called_once_with("svn:executable", Path("data.txt"))
 
 
 if __name__ == "__main__":

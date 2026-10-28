@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from pathlib import Path
 from typing import Tuple
 
 from .eol import detect_file_eol, normalize_file_eol
@@ -22,6 +23,17 @@ class SnapshotSynchronizer:
         self.git = git
         self.svn = svn
         self.dry_run = dry_run
+
+    def _sync_executable(self, rel_path: Path, mode: str | None, currently_executable: bool | None) -> None:
+        """Mirror the Git executable bit (100755 / 100644) onto svn:executable."""
+        if mode == "100755":
+            self.svn.sync_file_executable_property(
+                rel_path, is_executable=True, currently_executable=currently_executable
+            )
+        elif mode == "100644":
+            self.svn.sync_file_executable_property(
+                rel_path, is_executable=False, currently_executable=currently_executable
+            )
 
     def align_workspace(self, target_ref: str) -> Tuple[int, int, int]:
         """
@@ -61,6 +73,8 @@ class SnapshotSynchronizer:
 
         # 2. Handle modified files: compare content and write if changed
         modified_count = 0
+        # One 'svn proplist' call for all executable flags instead of one 'svn propget' per file
+        executable_files = self.svn.get_executable_files()
         for rel_path in common_files:
             dst_path = self.svn.workspace_dir / rel_path
             mode = git_modes.get(rel_path)
@@ -103,10 +117,8 @@ class SnapshotSynchronizer:
                         dst_path.write_bytes(target_bytes)
 
             if mode != "120000":
-                if mode == "100755":
-                    self.svn.sync_file_executable_property(rel_path, is_executable=True)
-                elif mode == "100644":
-                    self.svn.sync_file_executable_property(rel_path, is_executable=False)
+                known = (rel_path in executable_files) if executable_files is not None else None
+                self._sync_executable(rel_path, mode, known)
 
         # 3. Handle added files: extract from Git and run svn add
         for rel_path in added_files:
@@ -131,11 +143,13 @@ class SnapshotSynchronizer:
 
                 self.svn.stage_add(rel_path)
 
+        # svn add may apply auto-props, so look up the executable flags again (once) after adding
+        executable_files = self.svn.get_executable_files()
+        for rel_path in added_files:
+            mode = git_modes.get(rel_path)
             if mode != "120000":
-                if mode == "100755":
-                    self.svn.sync_file_executable_property(rel_path, is_executable=True)
-                elif mode == "100644":
-                    self.svn.sync_file_executable_property(rel_path, is_executable=False)
+                known = (rel_path in executable_files) if executable_files is not None else None
+                self._sync_executable(rel_path, mode, known)
 
         logger.info(
             "Snapshot staging completed: %d added, %d deleted, %d modified (uncommitted).",
