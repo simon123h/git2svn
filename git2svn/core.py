@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from .colors import TerminalColor
 from .eol import detect_file_eol, normalize_file_eol
-from .git import FileChange, GitRepo, parse_ref_arguments
+from .git import EMPTY_TREE_HASH, FileChange, GitRepo, parse_ref_arguments
 from .patcher import Patcher
 from .state import (
     ReplayState,
@@ -24,8 +24,6 @@ from .state import (
 from .svn import SvnError, SvnWorkspace
 
 logger = logging.getLogger("git2svn")
-
-EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def resolve_sync_range(git_repo: GitRepo, svn_workspace: SvnWorkspace) -> Optional[str]:
