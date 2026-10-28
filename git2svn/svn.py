@@ -256,30 +256,39 @@ class SvnWorkspace:
     def get_versioned_files(self) -> List[Path]:
         """
         Return list of all versioned file paths in the SVN workspace (relative to workspace_dir).
-        Queries 'svn status -v -q --depth infinity' (ignores unversioned files and directories).
+        Queries 'svn status --xml -v -q --depth infinity' (ignores unversioned files and directories).
+        XML output is used so paths containing spaces are reported exactly.
         Falls back to filesystem scan (excluding .svn) if svn command fails or workspace is empty.
         """
         files: List[Path] = []
-        res = self.run_cmd(["status", "-v", "-q", "--depth", "infinity"], check=False)
+        res = self.run_cmd(["status", "--xml", "-v", "-q", "--depth", "infinity"], check=False)
         if res.returncode == 0 and res.stdout.strip():
-            for line in res.stdout.splitlines():
-                parts = line.strip().split()
-                if not parts:
-                    continue
-                target_str = parts[-1]
-                target_path = Path(target_str)
-                if target_path.is_absolute():
-                    try:
-                        rel = target_path.relative_to(self.workspace_dir)
-                    except ValueError:
+            try:
+                status_root = ET.fromstring(res.stdout)
+            except ET.ParseError as e:
+                logger.debug("Failed to parse svn status --xml output: %s", e)
+                status_root = None
+            if status_root is not None:
+                for entry in status_root.iter("entry"):
+                    target_str = entry.get("path")
+                    wc_status = entry.find("wc-status")
+                    item = wc_status.get("item") if wc_status is not None else None
+                    # '-q' is ignored together with '-v' in XML mode, so drop non-versioned entries here.
+                    if not target_str or item in ("unversioned", "ignored", "external", "none"):
                         continue
-                else:
-                    rel = target_path
+                    target_path = Path(target_str)
+                    if target_path.is_absolute():
+                        try:
+                            rel = target_path.relative_to(self.workspace_dir)
+                        except ValueError:
+                            continue
+                    else:
+                        rel = target_path
 
-                full_path = self.workspace_dir / rel
-                if str(rel) != "." and (full_path.is_file() or full_path.is_symlink() or not full_path.exists()):
-                    files.append(rel)
-            return files
+                    full_path = self.workspace_dir / rel
+                    if str(rel) != "." and (full_path.is_file() or full_path.is_symlink() or not full_path.exists()):
+                        files.append(rel)
+                return files
 
         # Filesystem fallback if not in a working copy or status was empty
         for root, dirs, f_list in os.walk(self.workspace_dir):

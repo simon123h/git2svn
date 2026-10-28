@@ -1,4 +1,5 @@
 import io
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -521,3 +522,24 @@ class TestSvnEnv(unittest.TestCase):
             git2svn.SvnWorkspace(Path(d)).run_cmd(["info"], check=False)
         env = mock_run.call_args.kwargs["env"]
         self.assertEqual(env["LC_MESSAGES"], "C")
+
+
+@unittest.skipUnless(shutil.which("svn") and shutil.which("svnadmin"), "requires 'svn' and 'svnadmin' in PATH")
+class TestGetVersionedFilesRealSvn(unittest.TestCase):
+    def test_paths_with_spaces_and_directories(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            repo, wc = root / "repo", root / "wc"
+            subprocess.run(["svnadmin", "create", str(repo)], check=True, capture_output=True)
+            git2svn.svn.checkout_working_copy(repo, wc)
+            (wc / "my dir").mkdir()
+            (wc / "my dir" / "my file.txt").write_text("x")
+            (wc / "plain.txt").write_text("y")
+            (wc / "unversioned.txt").write_text("z")
+            ws = git2svn.SvnWorkspace(wc)
+            ws.stage_add(Path("my dir/my file.txt"))
+            ws.stage_add(Path("plain.txt"))
+
+            files = sorted(ws.get_versioned_files())
+
+        self.assertEqual(files, [Path("my dir/my file.txt"), Path("plain.txt")])
