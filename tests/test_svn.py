@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import git2svn
 
@@ -48,6 +48,7 @@ class TestSvnWorkspace(unittest.TestCase):
         mock_run.assert_called_once_with(
             [self.svn.svn_bin, "add", "nested/folder/file.txt", "--parents"],
             cwd=self.workspace_dir,
+            env=ANY,
             check=False,
             capture_output=True,
             text=True,
@@ -65,6 +66,7 @@ class TestSvnWorkspace(unittest.TestCase):
         mock_run.assert_called_once_with(
             [self.svn.svn_bin, "rm", "file_to_remove.txt"],
             cwd=self.workspace_dir,
+            env=ANY,
             check=False,
             capture_output=True,
             text=True,
@@ -82,6 +84,7 @@ class TestSvnWorkspace(unittest.TestCase):
         mock_run.assert_called_with(
             [self.svn.svn_bin, "propget", "svn:executable", "script.sh"],
             cwd=self.workspace_dir,
+            env=ANY,
             check=False,
             capture_output=True,
             text=True,
@@ -94,6 +97,7 @@ class TestSvnWorkspace(unittest.TestCase):
         mock_run.assert_called_with(
             [self.svn.svn_bin, "propset", "svn:executable", "*", "script.sh"],
             cwd=self.workspace_dir,
+            env=ANY,
             check=False,
             capture_output=True,
             text=True,
@@ -106,6 +110,7 @@ class TestSvnWorkspace(unittest.TestCase):
         mock_run.assert_called_with(
             [self.svn.svn_bin, "propdel", "svn:executable", "script.sh"],
             cwd=self.workspace_dir,
+            env=ANY,
             check=False,
             capture_output=True,
             text=True,
@@ -289,6 +294,7 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
         svn_bin = git2svn.svn.find_svn_binary()
         mock_run.assert_called_once_with(
             [svn_bin, "checkout", "https://svn.example.com/trunk", str(dest)],
+            env=ANY,
             check=False,
             capture_output=True,
             text=True,
@@ -488,3 +494,30 @@ class TestSvnLockAndCollisionHandling(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSvnEnv(unittest.TestCase):
+    def test_forces_untranslated_messages(self):
+        with patch.dict("os.environ", {"LANGUAGE": "de", "LC_MESSAGES": "de_DE.UTF-8"}, clear=False):
+            env = git2svn.svn.svn_env()
+        self.assertEqual(env["LC_MESSAGES"], "C")
+        self.assertEqual(env["LANGUAGE"], "C")
+
+    def test_lc_all_moves_to_lc_ctype_to_keep_encoding(self):
+        with patch.dict("os.environ", {"LC_ALL": "de_DE.UTF-8"}, clear=False):
+            with patch.dict("os.environ"):
+                import os
+
+                os.environ.pop("LC_CTYPE", None)
+                env = git2svn.svn.svn_env()
+        self.assertNotIn("LC_ALL", env)
+        self.assertEqual(env["LC_CTYPE"], "de_DE.UTF-8")
+        self.assertEqual(env["LC_MESSAGES"], "C")
+
+    @patch("subprocess.run")
+    def test_run_cmd_passes_untranslated_env(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as d:
+            git2svn.SvnWorkspace(Path(d)).run_cmd(["info"], check=False)
+        env = mock_run.call_args.kwargs["env"]
+        self.assertEqual(env["LC_MESSAGES"], "C")

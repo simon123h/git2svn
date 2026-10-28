@@ -15,6 +15,24 @@ from .git import FileChange
 logger = logging.getLogger("git2svn")
 
 
+def svn_env() -> Dict[str, str]:
+    """
+    Return an environment that makes svn emit untranslated (English) messages.
+
+    git2svn matches on svn's message text (e.g. "is already under version control"),
+    which is localized otherwise. Only the message catalog is forced: LC_ALL=C would also
+    change the character encoding and break non-ASCII file names, so a user-set LC_ALL is
+    moved to LC_CTYPE instead.
+    """
+    env = os.environ.copy()
+    lc_all = env.pop("LC_ALL", None)
+    if lc_all and "LC_CTYPE" not in env:
+        env["LC_CTYPE"] = lc_all
+    env["LC_MESSAGES"] = "C"
+    env["LANGUAGE"] = "C"
+    return env
+
+
 def find_svn_binary() -> str:
     """Find svn executable, checking TortoiseSVN / SlikSVN default paths if on Windows."""
     found = shutil.which("svn")
@@ -79,6 +97,7 @@ def checkout_working_copy(
     logger.info("Checking out SVN working copy from %s to %s...", target_str, destination_dir)
     res = subprocess.run(
         [bin_name, "checkout", target_str, str(destination_dir)],
+        env=svn_env(),
         check=False,
         capture_output=True,
         text=True,
@@ -174,6 +193,7 @@ class SvnWorkspace:
         return subprocess.run(
             cmd,
             cwd=self.workspace_dir,
+            env=svn_env(),
             check=check,
             capture_output=True,
             text=True,
