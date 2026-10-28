@@ -31,8 +31,9 @@ class SnapshotSynchronizer:
         """
         logger.info("Starting snapshot synchronization to Git ref '%s'...", target_ref)
 
-        git_files_list = self.git.get_tree_files(target_ref)
-        git_files_set = set(git_files_list)
+        # One 'git ls-tree' call for all modes instead of one per file
+        git_modes = self.git.get_tree_modes(target_ref)
+        git_files_set = set(git_modes)
         svn_files_list = self.svn.get_versioned_files()
         svn_files_set = set(svn_files_list)
 
@@ -62,7 +63,7 @@ class SnapshotSynchronizer:
         modified_count = 0
         for rel_path in common_files:
             dst_path = self.svn.workspace_dir / rel_path
-            mode = self.git.get_file_mode(target_ref, rel_path)
+            mode = git_modes.get(rel_path)
             content = self.git.get_file_content_bytes(target_ref, rel_path)
 
             if mode == "120000":
@@ -111,7 +112,7 @@ class SnapshotSynchronizer:
         for rel_path in added_files:
             logger.info("SVN staging snapshot add: %s", rel_path)
             dst_path = self.svn.workspace_dir / rel_path
-            mode = self.git.get_file_mode(target_ref, rel_path)
+            mode = git_modes.get(rel_path)
             content = self.git.get_file_content_bytes(target_ref, rel_path)
 
             if self.dry_run:

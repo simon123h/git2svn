@@ -4,7 +4,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("git2svn")
 
@@ -270,17 +270,21 @@ class GitRepo:
         res = self.run_cmd(["rev-list", "--merges", f"{start_ref}..{end_ref}"])
         return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
-    def get_tree_files(self, ref: str) -> List[Path]:
-        """Return list of all relative file paths at revision ref (from git ls-tree -r -z)."""
-        res = self.run_cmd_bytes(["ls-tree", "-r", "-z", "--name-only", ref])
-        raw_paths = res.stdout.split(b"\0")
-        files: List[Path] = []
-        for raw in raw_paths:
+    def get_tree_modes(self, ref: str) -> Dict[Path, str]:
+        """Return {relative path: file mode} for all files at revision ref (one 'git ls-tree -r -z' call)."""
+        res = self.run_cmd_bytes(["ls-tree", "-r", "-z", ref])
+        modes: Dict[Path, str] = {}
+        for raw in res.stdout.split(b"\0"):
             if not raw:
                 continue
-            path_str = raw.decode("utf-8", errors="replace")
-            files.append(Path(path_str))
-        return files
+            # Entry format: "<mode> <type> <sha>\t<path>"
+            meta, _, raw_path = raw.partition(b"\t")
+            modes[Path(raw_path.decode("utf-8", errors="replace"))] = meta.split(b" ", 1)[0].decode("ascii")
+        return modes
+
+    def get_tree_files(self, ref: str) -> List[Path]:
+        """Return list of all relative file paths at revision ref."""
+        return list(self.get_tree_modes(ref))
 
     def get_config(self, key: str) -> Optional[str]:
         """Read a configuration value from git config (local repository or global)."""

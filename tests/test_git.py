@@ -122,3 +122,35 @@ class TestGitDiffRobustness(unittest.TestCase):
 
         names = [(c.action, c.path.name) for c in self.repo.get_name_status("main...feat")]
         self.assertEqual(names, [("M", "f.txt")])
+
+
+class TestGitTreeModes(unittest.TestCase):
+    def test_modes_include_exec_symlink_and_odd_names(self):
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d).resolve()
+
+            def run(*a, stdin=None):
+                return subprocess.run(["git", *a], cwd=path, check=True, capture_output=True, input=stdin, text=True)
+
+            run("init", "-q", "-b", "main")
+            run("config", "user.email", "t@example.com")
+            run("config", "user.name", "T")
+            blob = run("hash-object", "-w", "--stdin", stdin="x\n").stdout.strip()
+            # Build the index directly so the test does not depend on filesystem support for
+            # exec bits, symlinks or tab characters in file names (CI also runs on Windows).
+            entries = {
+                "plain.txt": "100644",
+                "run.sh": "100755",
+                "link": "120000",
+                "sp ace/tab\tname@2x.txt": "100644",
+            }
+            for name, mode in entries.items():
+                run("update-index", "--add", "--cacheinfo", f"{mode},{blob},{name}")
+            run("commit", "-qm", "x")
+
+            modes = git2svn.GitRepo(path).get_tree_modes("HEAD")
+
+        self.assertEqual(modes, {Path(name): mode for name, mode in entries.items()})
