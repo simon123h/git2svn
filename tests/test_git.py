@@ -83,3 +83,35 @@ C090\tsrc/template.py\tsrc/instance.py
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGitDiffRobustness(unittest.TestCase):
+    def setUp(self):
+        import subprocess
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name).resolve()
+        self._run = lambda *a: subprocess.run(["git", *a], cwd=self.path, check=True, capture_output=True, text=True)
+        self._run("init", "-q", "-b", "main")
+        self._run("config", "user.email", "t@example.com")
+        self._run("config", "user.name", "T")
+        (self.path / "f.txt").write_text("a\n")
+        self._run("add", ".")
+        self._run("commit", "-qm", "base")
+        self.repo = git2svn.GitRepo(self.path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_three_dot_diff_excludes_upstream_only_changes(self):
+        self._run("branch", "feat")
+        (self.path / "upstream.txt").write_text("u\n")
+        self._run("add", ".")
+        self._run("commit", "-qm", "upstream")
+        self._run("checkout", "-q", "feat")
+        (self.path / "f.txt").write_text("a\nb\n")
+        self._run("commit", "-qam", "feat")
+
+        names = [(c.action, c.path.name) for c in self.repo.get_name_status("main...feat")]
+        self.assertEqual(names, [("M", "f.txt")])

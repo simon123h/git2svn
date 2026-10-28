@@ -24,6 +24,8 @@ from .svn import SvnError, SvnWorkspace
 
 logger = logging.getLogger("git2svn")
 
+EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 
 def resolve_sync_range(git_repo: GitRepo, svn_workspace: SvnWorkspace) -> Optional[str]:
     """
@@ -122,7 +124,7 @@ class Synchronizer:
             logger.info("Staging single commit %s (copy_mode=%s)", commit_hash, use_copy)
             if use_copy:
                 parent = self.git.get_commit_parent(commit_hash)
-                base_ref = parent if parent else "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+                base_ref = parent if parent else EMPTY_TREE_HASH
                 self._copy_and_stage_range(base_ref, commit_hash)
             else:
                 self._patch_and_stage_commit(commit_hash)
@@ -677,7 +679,9 @@ class Synchronizer:
 
     def _patch_and_stage_range(self, start_ref: str, end_ref: str) -> None:
         """Extract diff between two references, apply using git apply, and stage in SVN."""
-        ref_spec = f"{start_ref}..{end_ref}"
+        # Three-dot: diff against the merge-base, so changes that landed only on start_ref
+        # (e.g. the SVN mirror advancing) are not reverted in SVN.
+        ref_spec = f"{start_ref}...{end_ref}"
         diff_text = self.git.get_diff(ref_spec)
         changes = self.git.get_name_status(ref_spec)
 
@@ -712,7 +716,9 @@ class Synchronizer:
 
     def _copy_and_stage_range(self, base_ref: str, target_ref: str) -> None:
         """Brute-force copy changed files using Git object DB, and stage in SVN."""
-        ref_spec = f"{base_ref}..{target_ref}"
+        # The empty tree (root commits) is not a commit, so it has no merge-base.
+        sep = ".." if base_ref == EMPTY_TREE_HASH else "..."
+        ref_spec = f"{base_ref}{sep}{target_ref}"
         changes = self.git.get_name_status(ref_spec)
 
         target_eols: Dict[Path, Optional[bytes]] = {}

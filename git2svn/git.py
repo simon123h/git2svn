@@ -220,7 +220,10 @@ class GitRepo:
         return None
 
     def get_diff(self, ref_spec: str) -> bytes:
-        """Get unified diff for the given reference specification as raw bytes."""
+        """Get unified diff for the given reference specification as raw bytes.
+
+        Use 'A...B' to diff against the merge-base so upstream-only changes are not reverted.
+        """
         res = self.run_cmd_bytes(["diff", "--binary", ref_spec])
         return res.stdout
 
