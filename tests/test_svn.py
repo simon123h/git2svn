@@ -93,8 +93,9 @@ class TestSvnWorkspace(unittest.TestCase):
             errors="replace",
         )
 
-        # Test set_property
-        self.svn.set_property("svn:executable", "*", Path("script.sh"))
+        # Test set_property (bare value on the command line; the Windows -F variant has its own tests)
+        with patch("git2svn.svn._is_windows", return_value=False):
+            self.svn.set_property("svn:executable", "*", Path("script.sh"))
         mock_run.assert_called_with(
             [self.svn.svn_bin, "propset", "svn:executable", "*", "script.sh"],
             cwd=self.workspace_dir,
@@ -642,8 +643,8 @@ class TestPropsetValueFile(unittest.TestCase):
 
     @patch("git2svn.svn._is_windows", return_value=False)
     def test_other_platforms_pass_the_value_directly(self, _):
-        with tempfile.TemporaryDirectory() as d:
-            ws = self._workspace(d)
-            with patch.object(ws, "run_cmd", wraps=ws.run_cmd) as spy:
-                ws.set_property("svn:executable", "*", Path("a.txt"))
-            self.assertEqual(spy.call_args.args[0], ["propset", "svn:executable", "*", "a.txt"])
+        # Mocked on purpose: a bare '*' must never reach a real svn.exe on Windows (glob expansion)
+        ws = git2svn.SvnWorkspace(Path(tempfile.gettempdir()))
+        with patch.object(ws, "run_cmd", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            ws.set_property("svn:executable", "*", Path("a.txt"))
+        run.assert_called_once_with(["propset", "svn:executable", "*", "a.txt"], check=False)
