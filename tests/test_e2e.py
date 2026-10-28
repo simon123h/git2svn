@@ -361,6 +361,51 @@ class TestGit2SvnE2E(unittest.TestCase):
         self.assertIn("added.txt", listing)
         self.assertNotIn("to_delete.txt", listing)
 
+    def _conflicting_commit_with_new_file(self) -> str:
+        """Set up SVN/Git so that replaying the returned range conflicts and the commit also adds a file."""
+        f_git = self.git_dir / "conflict_target.txt"
+        f_git.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+        base_hash = self._git_commit("base")
+        (self.svn_wc_dir / "conflict_target.txt").write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "add", "conflict_target.txt"], cwd=self.svn_wc_dir, check=True)
+        subprocess.run([SVN_BIN, "commit", "-m", "init"], cwd=self.svn_wc_dir, check=True)
+        (self.svn_wc_dir / "conflict_target.txt").write_text("line 1 DIFFERENT\nline 2\nline 3\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "commit", "-m", "remote edit"], cwd=self.svn_wc_dir, check=True)
+
+        f_git.write_text("line 1 GIT_EDIT\nline 2 GIT_EDIT\nline 3\n", encoding="utf-8")
+        (self.git_dir / "newdir").mkdir()
+        (self.git_dir / "newdir" / "added.txt").write_text("new\n", encoding="utf-8")
+        self._git_commit("feat: conflict plus new file")
+        (self.git_dir / "second.txt").write_text("second\n", encoding="utf-8")
+        head = self._git_commit("feat: second")
+        return f"{base_hash}..{head}"
+
+    def test_e2e_replay_abort_removes_files_added_by_interrupted_commit(self):
+        rng = self._conflicting_commit_with_new_file()
+        unrelated = self.svn_wc_dir / "unrelated_unversioned.txt"
+        unrelated.write_text("keep me\n", encoding="utf-8")
+        args = ["-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+        self.assertNotEqual(cli_main(["replay", rng, *args]), 0)
+        # Leftover from the failed patch: the new file exists on disk, unversioned
+        self.assertTrue((self.svn_wc_dir / "newdir" / "added.txt").exists())
+
+        self.assertEqual(cli_main(["replay", "--abort", *args]), 0)
+
+        self.assertFalse((self.svn_wc_dir / "newdir").exists())
+        self.assertTrue(unrelated.exists(), "unrelated unversioned files must not be deleted")
+        self.assertEqual(self._svn_status().strip(), "? unrelated_unversioned.txt".replace("? ", "?       "))
+
+    def test_e2e_replay_skip_removes_files_added_by_skipped_commit(self):
+        rng = self._conflicting_commit_with_new_file()
+        args = ["-g", str(self.git_dir), "-s", str(self.svn_wc_dir)]
+        self.assertNotEqual(cli_main(["replay", rng, *args]), 0)
+
+        self.assertEqual(cli_main(["replay", "--skip", *args]), 0)
+
+        self.assertFalse((self.svn_wc_dir / "newdir").exists())
+        self.assertEqual((self.svn_wc_dir / "second.txt").read_text(encoding="utf-8"), "second\n")
+        self.assertEqual(self._svn_status().strip(), "")
+
     def test_e2e_file_renames_and_moves(self):
         """Test replay correctly handles file renames and moves across directories in real SVN."""
         # 1. Base commit: create src/old_name.txt

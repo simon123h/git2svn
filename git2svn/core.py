@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -182,11 +183,7 @@ class Synchronizer:
         # 4. Remove leftover unversioned files/dirs
         unversioned = self.svn.get_unversioned_items()
         for item in unversioned:
-            full_p = self.svn.workspace_dir / item
-            if full_p.is_dir() and not full_p.is_symlink():
-                shutil.rmtree(full_p, ignore_errors=True)
-            elif full_p.exists() or full_p.is_symlink():
-                full_p.unlink(missing_ok=True)
+            self._remove_path(self.svn.workspace_dir / item)
 
         # 5. Clear any interrupted replay state file
         clear_replay_state(self.svn.workspace_dir)
@@ -401,6 +398,8 @@ class Synchronizer:
         if not self.dry_run:
             self.svn.revert_all()
             clean_conflict_artifacts(self.svn.workspace_dir)
+            if session.state != "PAUSED":  # a merely paused commit was never applied
+                self._discard_commit_leftovers(current)
             clear_replay_state(self.svn.workspace_dir)
         logger.info("Replay aborted. SVN workspace reverted to last clean commit.")
 
@@ -422,6 +421,8 @@ class Synchronizer:
         if not self.dry_run:
             self.svn.revert_all()
             clean_conflict_artifacts(self.svn.workspace_dir)
+            if session.state != "PAUSED":  # a merely paused commit was never applied
+                self._discard_commit_leftovers(current)
 
         if remaining:
             self._execute_replay_queue(
@@ -674,6 +675,40 @@ class Synchronizer:
             ),
         )
 
+    def _commit_changes(self, commit_hash: str) -> List[FileChange]:
+        """Return the file changes introduced by a single commit (against its parent, or the empty tree)."""
+        parent = self.git.get_commit_parent(commit_hash)
+        if parent:
+            return self.git.get_name_status(f"{parent}..{commit_hash}")
+        return self.git.get_name_status_root(commit_hash)
+
+    def _discard_commit_leftovers(self, commit_hash: str) -> None:
+        """
+        Remove files the interrupted commit added to the workspace.
+
+        'svn revert' unschedules an added file but leaves it on disk as unversioned, which 'svn status -q'
+        ignores; the next replay would then fail with "already exists". Only paths this commit adds (or
+        their unversioned parent directories) are removed, so unrelated unversioned files are left alone.
+        """
+        try:
+            changes = self._commit_changes(commit_hash)
+        except (subprocess.CalledProcessError, OSError) as e:
+            # Best effort: e.g. the commit vanished after a rebase. Never block an abort/skip on it.
+            logger.warning("Could not determine files added by %s; leaving unversioned files: %s", commit_hash[:8], e)
+            return
+        added = [c.path for c in changes if c.is_added or c.is_renamed or c.is_copied]
+        for item in self.svn.get_unversioned_items():
+            if any(item == path or item in path.parents for path in added):
+                self._remove_path(self.svn.workspace_dir / item)
+
+    @staticmethod
+    def _remove_path(full_path: Path) -> None:
+        """Delete a file, symlink or directory tree."""
+        if full_path.is_dir() and not full_path.is_symlink():
+            shutil.rmtree(full_path, ignore_errors=True)
+        elif full_path.exists() or full_path.is_symlink():
+            full_path.unlink(missing_ok=True)
+
     def _range_spec(self, start_ref: str, end_ref: str) -> str:
         """
         Return the git diff spec for a range: 'start...end' (diff against the merge-base), so changes that
@@ -695,12 +730,7 @@ class Synchronizer:
         are idempotent, so anything the user already staged by hand is left alone. Adds whose file is not on
         disk (the user chose not to apply that part) are skipped.
         """
-        parent = self.git.get_commit_parent(commit_hash)
-        changes = (
-            self.git.get_name_status(f"{parent}..{commit_hash}")
-            if parent
-            else self.git.get_name_status_root(commit_hash)
-        )
+        changes = self._commit_changes(commit_hash)
 
         def on_disk(path: Path) -> bool:
             target = self.svn.workspace_dir / path

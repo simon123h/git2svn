@@ -649,6 +649,24 @@ class TestSynchronizer(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.sync_mgr.replay_continue()
 
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_replay_abort_succeeds_when_paused_commit_is_gone(self, mock_svn_cmd):
+        """Leftover cleanup is best-effort: an unresolvable commit must not block --abort."""
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        git2svn.save_replay_state(
+            self.svn_path,
+            {
+                "current_commit": "deadbeef",
+                "current_commit_msg": "m",
+                "remaining_commits": [],
+                "state": "CONFLICT_PAUSED",
+            },
+        )
+
+        self.sync_mgr.replay_abort()
+
+        self.assertIsNone(git2svn.load_replay_state(self.svn_path))
+
     def test_replay_abort_no_state_error(self):
         """Verify replay_abort raises RuntimeError if no replay state exists."""
         with self.assertRaises(RuntimeError):
