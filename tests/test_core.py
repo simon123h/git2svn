@@ -1102,6 +1102,7 @@ class TestSynchronizer(unittest.TestCase):
         (self.git_path / "other.txt").write_text("o1\n")
         self._git("add", ".")
         self._git("commit", "-m", "base")
+        base = self._git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()  # default branch name varies
         self._git("branch", "feat")
         (self.git_path / "other.txt").write_text("o2\n")
         self._git("commit", "-am", "mirror advanced")
@@ -1110,7 +1111,6 @@ class TestSynchronizer(unittest.TestCase):
         self._git("commit", "-am", "feat change")
         (self.svn_path / "app.py").write_text("v1\n")
         (self.svn_path / "other.txt").write_text("o2\n")
-        base = "main" if self._git("rev-parse", "--verify", "-q", "main").returncode == 0 else "master"
         return base
 
     @patch.object(git2svn.SvnWorkspace, "run_cmd")
