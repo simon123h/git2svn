@@ -1075,6 +1075,29 @@ class TestSynchronizer(unittest.TestCase):
             with self.assertRaises(git2svn.SvnError):
                 self.sync_mgr.replay(h)
 
+    def test_replay_svn_error_saves_state_for_continue(self):
+        """Verify an SvnError during commit persists replay state so --continue can resume."""
+        (self.git_path / "f.txt").write_text("content")
+        subprocess.run(["git", "add", "."], cwd=self.git_path, check=True)
+        subprocess.run(["git", "commit", "-m", "commit 1"], cwd=self.git_path, check=True)
+        h = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=self.git_path, capture_output=True, text=True
+        ).stdout.strip()
+
+        with (
+            patch.object(self.svn_ws, "is_clean", return_value=True),
+            patch.object(self.svn_ws, "update"),
+            patch.object(self.sync_mgr, "_patch_and_stage_commit"),
+            patch.object(self.svn_ws, "commit", side_effect=git2svn.SvnError("out of date")),
+        ):
+            with self.assertRaises(git2svn.SvnError):
+                self.sync_mgr.replay(h)
+
+        session = git2svn.state.load_replay_session(self.svn_path)
+        self.assertIsNotNone(session)
+        self.assertEqual(session.current_commit, h)
+        self.assertEqual(session.state, "CONFLICT_PAUSED")
+
     def test_stage_copy_mode_deletions_and_renames(self):
         """Verify copy mode handles file deletions and renames in SVN."""
         (self.git_path / "base.txt").write_text("base")

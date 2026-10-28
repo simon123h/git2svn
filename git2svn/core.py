@@ -599,26 +599,24 @@ class Synchronizer:
                 elapsed = time.perf_counter() - commit_start
                 sys.stdout.write(f"FAILED (SVN error, {elapsed:.2f}s)\n")
                 sys.stdout.flush()
-                # SVN operational failure (e.g. working copy locked, out-of-date, collision)
-                # Re-raise directly to display actionable SVN resolution hints
+                # SVN operational failure (e.g. working copy locked, out-of-date, collision).
+                # Persist state so the user can fix the cause and resume with --continue
+                # (which commits whatever is staged for this commit) instead of being stuck
+                # with a dirty workspace and "No replay in progress".
+                self._save_failure_state(commits, idx, start_index, total_commits, commit_hash, commit_msg)
+                paused_badge = self.color.paused_badge("[PAUSED]")
+                print(
+                    f'\n{paused_badge} SVN error while applying commit {commit_hash[:8]} ({idx}/{total_commits}): "{first_line}"\n'
+                    "After fixing the cause, run: git2svn replay --continue\n"
+                    "(or 'git2svn replay --abort' to discard, or 'git2svn replay --skip' to skip)\n",
+                    file=sys.stderr,
+                )
                 raise
             except Exception:
                 elapsed = time.perf_counter() - commit_start
                 sys.stdout.write(f"CONFLICT ({elapsed:.2f}s)\n")
                 sys.stdout.flush()
-                remaining = commits[idx - start_index + 1 :]
-                state_data = ReplayState(
-                    git_dir=str(self.git.repo_dir),
-                    svn_dir=str(self.svn.workspace_dir),
-                    current_commit=commit_hash,
-                    current_commit_msg=commit_msg,
-                    remaining_commits=remaining,
-                    total_commits=total_commits,
-                    completed_commits=idx - 1,
-                    state="CONFLICT_PAUSED",
-                )
-                if not self.dry_run:
-                    save_replay_state(self.svn.workspace_dir, state_data)
+                self._save_failure_state(commits, idx, start_index, total_commits, commit_hash, commit_msg)
 
                 rej_files = find_conflict_artifacts(self.svn.workspace_dir)
                 rej_info = ""
@@ -646,6 +644,32 @@ class Synchronizer:
             total_elapsed,
         )
         self.svn.update()
+
+    def _save_failure_state(
+        self,
+        commits: List[str],
+        idx: int,
+        start_index: int,
+        total_commits: int,
+        commit_hash: str,
+        commit_msg: str,
+    ) -> None:
+        """Persist a CONFLICT_PAUSED replay state for the commit at queue position idx."""
+        if self.dry_run:
+            return
+        save_replay_state(
+            self.svn.workspace_dir,
+            ReplayState(
+                git_dir=str(self.git.repo_dir),
+                svn_dir=str(self.svn.workspace_dir),
+                current_commit=commit_hash,
+                current_commit_msg=commit_msg,
+                remaining_commits=commits[idx - start_index + 1 :],
+                total_commits=total_commits,
+                completed_commits=idx - 1,
+                state="CONFLICT_PAUSED",
+            ),
+        )
 
     def _patch_and_stage_commit(self, commit_hash: str) -> None:
         """Extract diff for a single commit, apply using git apply, and stage in SVN."""
