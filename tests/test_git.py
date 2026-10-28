@@ -111,6 +111,14 @@ class TestGitDiffRobustness(unittest.TestCase):
         diff = self.repo.get_diff("HEAD~1..HEAD").decode()
         self.assertIn("diff --git a/f.txt b/f.txt", diff)
 
+    def test_has_merge_base(self):
+        self._run("branch", "feat")
+        self.assertTrue(self.repo.has_merge_base("main", "feat"))
+        self._run("checkout", "-q", "--orphan", "unrelated")
+        self._run("commit", "-q", "--allow-empty", "-m", "other root")
+        self.assertFalse(self.repo.has_merge_base("main", "unrelated"))
+        self.assertFalse(self.repo.has_merge_base("4b825dc642cb6eb9a060e54bf8d69288fbee4904", "main"))  # empty tree
+
     def test_three_dot_diff_excludes_upstream_only_changes(self):
         self._run("branch", "feat")
         (self.path / "upstream.txt").write_text("u\n")

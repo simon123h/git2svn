@@ -217,6 +217,11 @@ class GitRepo:
         res = self.run_cmd(["rev-parse", "--verify", "--quiet", ref], check=False)
         return res.returncode == 0
 
+    def has_merge_base(self, ref_a: str, ref_b: str) -> bool:
+        """Check whether two refs are commits sharing history (False for unrelated histories or trees)."""
+        res = self.run_cmd(["merge-base", ref_a, ref_b], check=False)
+        return res.returncode == 0
+
     def get_commit_parent(self, commit_hash: str) -> Optional[str]:
         """Return the parent commit hash, or None if root commit."""
         res = self.run_cmd(["rev-parse", "--verify", f"{commit_hash}^"], check=False)

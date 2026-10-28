@@ -1075,6 +1075,63 @@ class TestSynchronizer(unittest.TestCase):
             with self.assertRaises(git2svn.SvnError):
                 self.sync_mgr.replay(h)
 
+    def _git(self, *args):
+        return subprocess.run(["git", *args], cwd=self.git_path, check=True, capture_output=True, text=True)
+
+    def _setup_advanced_mirror(self):
+        """main (the 'mirror') advances after feat branched off; SVN already contains main's latest change."""
+        (self.git_path / "app.py").write_text("v1\n")
+        (self.git_path / "other.txt").write_text("o1\n")
+        self._git("add", ".")
+        self._git("commit", "-m", "base")
+        self._git("branch", "feat")
+        (self.git_path / "other.txt").write_text("o2\n")
+        self._git("commit", "-am", "mirror advanced")
+        self._git("checkout", "feat")
+        (self.git_path / "app.py").write_text("v2\n")
+        self._git("commit", "-am", "feat change")
+        (self.svn_path / "app.py").write_text("v1\n")
+        (self.svn_path / "other.txt").write_text("o2\n")
+        base = "main" if self._git("rev-parse", "--verify", "-q", "main").returncode == 0 else "master"
+        return base
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_stage_range_does_not_revert_upstream_only_changes(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        base = self._setup_advanced_mirror()
+
+        self.sync_mgr.stage(base, "feat")
+
+        self.assertEqual((self.svn_path / "app.py").read_text(), "v2\n")
+        self.assertEqual((self.svn_path / "other.txt").read_text(), "o2\n")  # not reverted to o1
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_stage_copy_range_does_not_revert_upstream_only_changes(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        base = self._setup_advanced_mirror()
+
+        self.sync_mgr.stage(base, "feat", use_copy=True)
+
+        self.assertEqual((self.svn_path / "app.py").read_text(), "v2\n")
+        self.assertEqual((self.svn_path / "other.txt").read_text(), "o2\n")
+
+    @patch.object(git2svn.SvnWorkspace, "run_cmd")
+    def test_stage_range_unrelated_histories_falls_back_to_tree_diff(self, mock_svn_cmd):
+        mock_svn_cmd.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        (self.git_path / "f.txt").write_text("one\n")
+        self._git("add", ".")
+        self._git("commit", "-m", "first")
+        first = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("checkout", "--orphan", "other")
+        (self.git_path / "f.txt").write_text("two\n")
+        self._git("add", ".")
+        self._git("commit", "-m", "unrelated root")
+        (self.svn_path / "f.txt").write_text("one\n")
+
+        self.sync_mgr.stage(first, "other")
+
+        self.assertEqual((self.svn_path / "f.txt").read_text(), "two\n")
+
     def test_replay_svn_error_saves_state_for_continue(self):
         """Verify an SvnError during commit persists replay state so --continue can resume."""
         (self.git_path / "f.txt").write_text("content")
