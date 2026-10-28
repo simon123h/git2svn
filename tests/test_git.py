@@ -104,6 +104,13 @@ class TestGitDiffRobustness(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def test_diff_ignores_noprefix_config(self):
+        self._run("config", "diff.noprefix", "true")
+        (self.path / "f.txt").write_text("a\nb\n")
+        self._run("commit", "-qam", "change")
+        diff = self.repo.get_diff("HEAD~1..HEAD").decode()
+        self.assertIn("diff --git a/f.txt b/f.txt", diff)
+
     def test_three_dot_diff_excludes_upstream_only_changes(self):
         self._run("branch", "feat")
         (self.path / "upstream.txt").write_text("u\n")

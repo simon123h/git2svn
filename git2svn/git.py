@@ -9,6 +9,11 @@ from typing import List, Optional, Tuple
 logger = logging.getLogger("git2svn")
 
 
+# Flags that make `git diff` output independent of user config (diff.noprefix, diff.external,
+# color.ui=always, ...) so it can be fed to `git apply` and parsed reliably.
+STABLE_DIFF_FLAGS = ["--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"]
+
+
 def parse_ref_arguments(
     primary_ref: Optional[str], secondary_ref: Optional[str] = None
 ) -> Tuple[bool, str, Optional[str]]:
@@ -224,24 +229,24 @@ class GitRepo:
 
         Use 'A...B' to diff against the merge-base so upstream-only changes are not reverted.
         """
-        res = self.run_cmd_bytes(["diff", "--binary", ref_spec])
+        res = self.run_cmd_bytes(["diff", "--binary", *STABLE_DIFF_FLAGS, ref_spec])
         return res.stdout
 
     def get_diff_root(self, commit_hash: str) -> bytes:
         """Get unified diff for a root commit as raw bytes."""
         empty_tree_hash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        res = self.run_cmd_bytes(["diff", "--binary", empty_tree_hash, commit_hash])
+        res = self.run_cmd_bytes(["diff", "--binary", *STABLE_DIFF_FLAGS, empty_tree_hash, commit_hash])
         return res.stdout
 
     def get_name_status(self, ref_spec: str) -> List[FileChange]:
         """Get list of changed files with their status."""
-        res = self.run_cmd(["diff", "-z", "--name-status", ref_spec])
+        res = self.run_cmd(["diff", "-z", "--name-status", "--no-ext-diff", "--no-color", ref_spec])
         return parse_name_status_z(res.stdout)
 
     def get_name_status_root(self, commit_hash: str) -> List[FileChange]:
         """Get list of changed files for a root commit."""
         empty_tree_hash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-        res = self.run_cmd(["diff", "-z", "--name-status", empty_tree_hash, commit_hash])
+        res = self.run_cmd(["diff", "-z", "--name-status", "--no-ext-diff", "--no-color", empty_tree_hash, commit_hash])
         return parse_name_status_z(res.stdout)
 
     def get_commit_message(self, commit_hash: str) -> str:
