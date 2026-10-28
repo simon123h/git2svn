@@ -355,7 +355,10 @@ class Synchronizer:
             )
             return
 
-        # 2. Commit the resolved changes for the interrupted commit
+        # 2. Stage the interrupted commit's adds/deletes/renames, which the failed patch step never reached
+        self._restage_commit_changes(current_commit)
+
+        # 3. Commit the resolved changes for the interrupted commit
         pad_width = len(str(total))
         first_line = current_msg.splitlines()[0] if current_msg else ""
         progress_prefix = f"[{completed + 1:>{pad_width}}/{total}] Resolving {current_commit[:8]}: {first_line}"
@@ -377,7 +380,7 @@ class Synchronizer:
         completed += 1
         logger.info("Commit %s (%d/%d) resolved and committed.", current_commit, completed, total)
 
-        # 3. Resume remaining queue
+        # 4. Resume remaining queue
         if remaining:
             self._execute_replay_queue(
                 remaining, total_commits=total, start_index=completed + 1, force=True, interactive=interactive
@@ -670,6 +673,42 @@ class Synchronizer:
                 state="CONFLICT_PAUSED",
             ),
         )
+
+    def _restage_commit_changes(self, commit_hash: str) -> None:
+        """
+        Re-run the SVN structural staging (add/rm/rename, svn:executable) for a commit whose patch step failed.
+
+        'git apply --reject' aborts _patch_and_stage_commit before apply_structural_changes, so new files stay
+        unversioned (invisible to 'svn status -q') and --continue would silently drop them. The SVN operations
+        are idempotent, so anything the user already staged by hand is left alone. Adds whose file is not on
+        disk (the user chose not to apply that part) are skipped.
+        """
+        parent = self.git.get_commit_parent(commit_hash)
+        changes = (
+            self.git.get_name_status(f"{parent}..{commit_hash}")
+            if parent
+            else self.git.get_name_status_root(commit_hash)
+        )
+
+        def on_disk(path: Path) -> bool:
+            target = self.svn.workspace_dir / path
+            return target.exists() or target.is_symlink()
+
+        stageable: List[FileChange] = []
+        for change in changes:
+            if change.is_deleted or on_disk(change.path):
+                stageable.append(change)
+            elif change.is_renamed and change.old_path is not None:
+                # Destination was not created: only the removal of the old path can be staged.
+                stageable.append(FileChange("D", str(change.old_path)))
+                logger.warning(
+                    "%s not present in SVN workspace; staging only removal of %s.", change.path, change.old_path
+                )
+            else:
+                logger.warning("%s not present in SVN workspace; not staging it.", change.path)
+
+        self.svn.apply_structural_changes(stageable)
+        self._sync_executable_properties(commit_hash, stageable)
 
     def _patch_and_stage_commit(self, commit_hash: str) -> None:
         """Extract diff for a single commit, apply using git apply, and stage in SVN."""

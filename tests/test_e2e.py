@@ -322,6 +322,45 @@ class TestGit2SvnE2E(unittest.TestCase):
         )
         self.assertEqual((self.svn_wc_dir / "subsequent.txt").read_text(encoding="utf-8"), "subsequent content\n")
 
+    def test_e2e_continue_stages_new_files_of_conflicted_commit(self):
+        """A conflicted commit that also adds/deletes files must not lose them on --continue."""
+        f_git = self.git_dir / "conflict_target.txt"
+        f_git.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+        (self.git_dir / "to_delete.txt").write_text("bye\n", encoding="utf-8")
+        base_hash = self._git_commit("base")
+
+        for name in ("conflict_target.txt", "to_delete.txt"):
+            (self.svn_wc_dir / name).write_text(f_git.read_text() if name.startswith("conflict") else "bye\n")
+        subprocess.run([SVN_BIN, "add", "conflict_target.txt", "to_delete.txt"], cwd=self.svn_wc_dir, check=True)
+        subprocess.run([SVN_BIN, "commit", "-m", "init"], cwd=self.svn_wc_dir, check=True)
+        (self.svn_wc_dir / "conflict_target.txt").write_text("line 1 DIFFERENT\nline 2\nline 3\n", encoding="utf-8")
+        subprocess.run([SVN_BIN, "commit", "-m", "remote edit"], cwd=self.svn_wc_dir, check=True)
+
+        # One Git commit: conflicting edit + new file + deleted file
+        f_git.write_text("line 1 GIT_EDIT\nline 2 GIT_EDIT\nline 3\n", encoding="utf-8")
+        (self.git_dir / "added.txt").write_text("new\n", encoding="utf-8")
+        (self.git_dir / "to_delete.txt").unlink()
+        head = self._git_commit("feat: conflict plus add and delete")
+
+        exit_code = cli_main(["replay", f"{base_hash}..{head}", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertNotEqual(exit_code, 0)
+        rej_file = self.svn_wc_dir / "conflict_target.txt.rej"
+        self.assertTrue(rej_file.exists())
+
+        # Resolve only the conflicting file; deliberately do NOT 'svn add' the new file
+        (self.svn_wc_dir / "conflict_target.txt").write_text("line 1 RESOLVED\nline 2 GIT_EDIT\nline 3\n")
+        rej_file.unlink()
+
+        cont_code = cli_main(["replay", "--continue", "-g", str(self.git_dir), "-s", str(self.svn_wc_dir)])
+        self.assertEqual(cont_code, 0)
+
+        self.assertEqual(self._svn_status().strip(), "")
+        listing = subprocess.run(
+            [SVN_BIN, "ls", "-R", self.svn_repo_dir.as_uri()], check=True, capture_output=True, text=True
+        ).stdout.split()
+        self.assertIn("added.txt", listing)
+        self.assertNotIn("to_delete.txt", listing)
+
     def test_e2e_file_renames_and_moves(self):
         """Test replay correctly handles file renames and moves across directories in real SVN."""
         # 1. Base commit: create src/old_name.txt
