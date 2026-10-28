@@ -33,6 +33,17 @@ def svn_env() -> Dict[str, str]:
     return env
 
 
+def svn_target(path: Path | str) -> str:
+    """
+    Return path as an svn command-line target (forward slashes).
+
+    svn reads 'name@rev' as a peg revision, so a path containing '@' needs a trailing '@'
+    ('icon@2x.png' -> 'icon@2x.png@') to be taken literally.
+    """
+    target = Path(path).as_posix()
+    return f"{target}@" if "@" in target else target
+
+
 def find_svn_binary() -> str:
     """Find svn executable, checking TortoiseSVN / SlikSVN default paths if on Windows."""
     found = shutil.which("svn")
@@ -336,7 +347,7 @@ class SvnWorkspace:
             print(f"[DRY-RUN] Ensure parent directory exists: {target_path.parent}")
 
         posix_path = rel_path.as_posix()
-        res = self.run_cmd(["add", posix_path, "--parents"], check=False)
+        res = self.run_cmd(["add", svn_target(rel_path), "--parents"], check=False)
         if res.returncode != 0:
             if "is already under version control" not in res.stderr and "already exists" not in res.stderr:
                 logger.error("Failed to 'svn add %s': %s", posix_path, res.stderr.strip())
@@ -345,7 +356,7 @@ class SvnWorkspace:
     def stage_rm(self, rel_path: Path) -> None:
         """Run svn rm <filepath>."""
         posix_path = rel_path.as_posix()
-        res = self.run_cmd(["rm", posix_path], check=False)
+        res = self.run_cmd(["rm", svn_target(rel_path)], check=False)
         if res.returncode != 0:
             if "is not under version control" in res.stderr:
                 logger.warning("File %s not under SVN control to remove.", posix_path)
@@ -359,7 +370,7 @@ class SvnWorkspace:
         if self.dry_run:
             print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} propset {prop_name} {prop_val} {target}")
             return
-        res = self.run_cmd(["propset", prop_name, prop_val, target], check=False)
+        res = self.run_cmd(["propset", prop_name, prop_val, svn_target(target)], check=False)
         if res.returncode != 0:
             logger.warning("Failed to set property %s on %s: %s", prop_name, target, res.stderr.strip())
 
@@ -369,7 +380,7 @@ class SvnWorkspace:
         if self.dry_run:
             print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} propdel {prop_name} {target}")
             return
-        res = self.run_cmd(["propdel", prop_name, target], check=False)
+        res = self.run_cmd(["propdel", prop_name, svn_target(target)], check=False)
         if res.returncode != 0:
             logger.warning("Failed to delete property %s on %s: %s", prop_name, target, res.stderr.strip())
 
@@ -378,7 +389,7 @@ class SvnWorkspace:
         target = Path(path).as_posix()
         if self.dry_run:
             return None
-        res = self.run_cmd(["propget", prop_name, target], check=False)
+        res = self.run_cmd(["propget", prop_name, svn_target(target)], check=False)
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
         return None

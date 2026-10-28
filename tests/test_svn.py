@@ -543,3 +543,34 @@ class TestGetVersionedFilesRealSvn(unittest.TestCase):
             files = sorted(ws.get_versioned_files())
 
         self.assertEqual(files, [Path("my dir/my file.txt"), Path("plain.txt")])
+
+
+class TestSvnTarget(unittest.TestCase):
+    def test_plain_path_unchanged(self):
+        self.assertEqual(git2svn.svn.svn_target(Path("a/b c.txt")), "a/b c.txt")
+
+    def test_at_sign_gets_trailing_at(self):
+        self.assertEqual(git2svn.svn.svn_target(Path("img/icon@2x.png")), "img/icon@2x.png@")
+
+
+@unittest.skipUnless(shutil.which("svn") and shutil.which("svnadmin"), "requires 'svn' and 'svnadmin' in PATH")
+class TestAtSignFileNamesRealSvn(unittest.TestCase):
+    def test_add_props_and_remove_with_at_in_name(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            repo, wc = root / "repo", root / "wc"
+            subprocess.run(["svnadmin", "create", str(repo)], check=True, capture_output=True)
+            git2svn.svn.checkout_working_copy(repo, wc)
+            name = Path("icon@2x.png")
+            (wc / name).write_text("x")
+            ws = git2svn.SvnWorkspace(wc)
+
+            ws.stage_add(name)
+            ws.sync_file_executable_property(name, is_executable=True)
+            self.assertEqual(ws.get_property("svn:executable", name), "*")
+            ws.sync_file_executable_property(name, is_executable=False)
+            self.assertIsNone(ws.get_property("svn:executable", name))
+            ws.commit("add")
+            ws.stage_rm(name)
+
+            self.assertEqual(ws.get_status_summary(), ["D       icon@2x.png"])
