@@ -44,6 +44,10 @@ def svn_target(path: Path | str) -> str:
     return f"{target}@" if "@" in target else target
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
 def find_svn_binary() -> str:
     """Find svn executable, checking TortoiseSVN / SlikSVN default paths if on Windows."""
     found = shutil.which("svn")
@@ -364,13 +368,30 @@ class SvnWorkspace:
                 logger.error("Failed to 'svn rm %s': %s", posix_path, res.stderr.strip())
                 raise parse_svn_error(res.stderr, f"remove '{posix_path}'", self.workspace_dir)
 
+    def _run_propset(self, prop_name: str, prop_val: str, target: str) -> subprocess.CompletedProcess[str]:
+        """
+        Run 'svn propset'. On Windows svn.exe expands unquoted wildcards in its arguments, which turns the
+        value '*' of svn:executable into the names of the files in the working directory. Values containing
+        wildcard characters are therefore passed through a file ('-F') there, which stores them verbatim.
+        """
+        if not (_is_windows() and any(c in prop_val for c in "*?[")):
+            return self.run_cmd(["propset", prop_name, prop_val, target], check=False)
+
+        with tempfile.NamedTemporaryFile("wb", delete=False) as tf:
+            tf.write(prop_val.encode("utf-8"))
+            tf_path = Path(tf.name)
+        try:
+            return self.run_cmd(["propset", prop_name, "-F", str(tf_path), target], check=False)
+        finally:
+            tf_path.unlink(missing_ok=True)
+
     def set_property(self, prop_name: str, prop_val: str, path: Path | str) -> None:
         """Set an SVN property on a file in the working copy."""
         target = Path(path).as_posix()
         if self.dry_run:
             print(f"[DRY-RUN] (in {self.workspace_dir}) {self.svn_bin} propset {prop_name} {prop_val} {target}")
             return
-        res = self.run_cmd(["propset", prop_name, prop_val, svn_target(target)], check=False)
+        res = self._run_propset(prop_name, prop_val, svn_target(target))
         if res.returncode != 0:
             logger.warning("Failed to set property %s on %s: %s", prop_name, target, res.stderr.strip())
 

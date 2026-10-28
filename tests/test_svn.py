@@ -601,3 +601,49 @@ class TestGetExecutableFilesRealSvn(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertIsNone(git2svn.SvnWorkspace(Path(d), dry_run=True).get_executable_files())
             self.assertIsNone(git2svn.SvnWorkspace(Path(d)).get_executable_files())  # not a working copy
+
+
+@unittest.skipUnless(shutil.which("svn") and shutil.which("svnadmin"), "requires 'svn' and 'svnadmin' in PATH")
+class TestPropsetValueFile(unittest.TestCase):
+    """The Windows branch of set_property (value via -F) is exercised on every platform with real svn."""
+
+    def _workspace(self, d):
+        root = Path(d).resolve()
+        repo, wc = root / "repo", root / "wc"
+        subprocess.run(["svnadmin", "create", str(repo)], check=True, capture_output=True)
+        git2svn.svn.checkout_working_copy(repo, wc)
+        ws = git2svn.SvnWorkspace(wc)
+        for name in ("a.txt", "b.txt", "c@d.txt"):
+            (wc / name).write_text("x")
+            ws.stage_add(Path(name))
+        return ws
+
+    def test_wildcard_value_is_stored_verbatim_via_file(self):
+        with tempfile.TemporaryDirectory() as d, patch("git2svn.svn._is_windows", return_value=True):
+            ws = self._workspace(d)
+            with patch.object(ws, "run_cmd", wraps=ws.run_cmd) as spy:
+                ws.set_property("svn:executable", "*", Path("a.txt"))
+            args = spy.call_args.args[0]
+            self.assertIn("-F", args)
+            self.assertNotIn("*", args, "a bare '*' would be glob-expanded by svn.exe on Windows")
+            ws.set_property("svn:executable", "*", Path("c@d.txt"))
+
+            for name in ("a.txt", "c@d.txt"):
+                res = ws.run_cmd(["propget", "--strict", "svn:executable", git2svn.svn.svn_target(name)])
+                self.assertEqual(res.stdout, "*", name)
+            self.assertIsNone(ws.get_property("svn:executable", Path("b.txt")))
+
+    def test_windows_branch_leaves_plain_values_on_the_command_line(self):
+        with tempfile.TemporaryDirectory() as d, patch("git2svn.svn._is_windows", return_value=True):
+            ws = self._workspace(d)
+            with patch.object(ws, "run_cmd", wraps=ws.run_cmd) as spy:
+                ws.set_property("svn:keywords", "Id", Path("a.txt"))
+            self.assertEqual(spy.call_args.args[0], ["propset", "svn:keywords", "Id", "a.txt"])
+
+    @patch("git2svn.svn._is_windows", return_value=False)
+    def test_other_platforms_pass_the_value_directly(self, _):
+        with tempfile.TemporaryDirectory() as d:
+            ws = self._workspace(d)
+            with patch.object(ws, "run_cmd", wraps=ws.run_cmd) as spy:
+                ws.set_property("svn:executable", "*", Path("a.txt"))
+            self.assertEqual(spy.call_args.args[0], ["propset", "svn:executable", "*", "a.txt"])
