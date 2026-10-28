@@ -1,3 +1,4 @@
+import sys
 import unittest
 from pathlib import Path
 
@@ -153,8 +154,10 @@ class TestGitTreeModes(unittest.TestCase):
                 "plain.txt": "100644",
                 "run.sh": "100755",
                 "link": "120000",
-                "sp ace/tab\tname@2x.txt": "100644",
+                "sp ace/name@2x.txt": "100644",
             }
+            if sys.platform != "win32":  # git refuses tabs in paths on Windows (core.protectNTFS)
+                entries["sp ace/tab\tname.txt"] = "100644"
             for name, mode in entries.items():
                 run("update-index", "--add", "--cacheinfo", f"{mode},{blob},{name}")
             run("commit", "-qm", "x")
